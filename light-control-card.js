@@ -14,20 +14,12 @@ class LightGroupCard extends HTMLElement {
        const st = this._hass.states[entity];
        if (!st) return;
        const dragState = this._dragging[entity];
-       if (dragState?.active) {
-           // Use the dragging value instead of HA state
-           const pct = dragState.lastPct ?? 0;
-           const fillEl = header.querySelector(".slider-fill");
-           const pctEl  = header.querySelector(".percent");
-           fillEl.style.width = `${pct}%`;
-           pctEl.textContent = `${pct}%`;
-           return;  // skip rest of update
-       }
+       if (dragState?.active) return; // skip updating while dragging
        const on = st.state === "on";
        const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness / 2.55) : 0;
    
-       const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : this._defaultRgb;
-       const rgba = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${on ? 0.4 : 0.25})`;
+      const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : this._defaultRgb;
+      const rgba = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${on ? 0.4 : 0.25})`;
        const hsl = this._rgbToHsl(...rgb);
        const iconHsl = `hsl(${hsl.h},${hsl.s}%,${Math.min(100,hsl.l+60)}%)`;
    
@@ -188,7 +180,6 @@ class LightGroupCard extends HTMLElement {
         const up = ev => {
           if (!dragState.active) return;
           dragState.active = false;
-          dragState.dragged = false;
           track.releasePointerCapture(ev.pointerId);
           const rect = track.getBoundingClientRect();
           let pct = ((ev.clientX - rect.left) / rect.width) * 100;
@@ -201,6 +192,7 @@ class LightGroupCard extends HTMLElement {
               commitBrightness(0, false); // just update UI, don't call HA
           }
       
+          dragState.dragged = false;
         };
       
         track.addEventListener("pointermove", move);
@@ -234,7 +226,7 @@ class LightGroupCard extends HTMLElement {
       header.addEventListener("click", e => {
           if (e.target.closest(".icon,.chevron,.lux")) return;
           const dragState = this._dragging[entity];
-          if (dragState?.active) {  // <<< ignore click if we just dragged
+          if (dragState?.dragged) {  // <<< ignore click if we just dragged
               dragState.dragged = false; // reset for next time
               return;
           }
