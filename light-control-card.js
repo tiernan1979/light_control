@@ -130,19 +130,25 @@ class LightGroupCard extends HTMLElement {
         ? `<span class="lux" data-entity="${g.lux_sensor}">-- lx</span>`
         : "";
       const manual = JSON.stringify(g.lights || []).replace(/"/g, "&quot;");
+      const lightCount = (g.lights && g.lights.length) || 0;
+      const isSingle = lightCount <= 1;
+      const iconName = isSingle ? (g.icon || "mdi:lightbulb") : (g.icon || "mdi:lightbulb-group");
+      const chevronHtml = isSingle ? "" : `<ha-icon class="chevron" icon="mdi:chevron-right"></ha-icon>`;
+      
       html += `
-        <div class="group" data-entity="${g.entity || ""}" data-manual="${manual}">
+        <div class="group" data-entity="${g.entity || ""}" data-manual="${manual}" data-single="${isSingle}">
           <div class="header" data-type="group">
-            <ha-icon class="icon" icon="${g.icon || "mdi:lightbulb-group"}"></ha-icon>
+            <ha-icon class="icon" icon="${iconName}"></ha-icon>
             <span class="name">${g.name}</span>
             ${lux}
             <span class="percent">0%</span>
-            <ha-icon class="chevron" icon="mdi:chevron-right"></ha-icon>
+            ${chevronHtml}
             <div class="slider-fill"></div>
             <div class="slider-track"></div>
           </div>
           <div class="individuals"></div>
         </div>`;
+
     });
 
     groupsDiv.innerHTML = html;
