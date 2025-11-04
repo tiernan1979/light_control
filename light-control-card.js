@@ -134,7 +134,6 @@ class LightGroupCard extends HTMLElement {
         const state = entity ? this._hass.states[entity] : null;
         const rgb = state?.attributes?.rgb_color ?? this._dragging[entity].lastRgb ?? this._defaultRgb;
         const rgba = `rgba(${rgb[0]},${rgb[1]},${rgb[2]}, pct>0 ? 0.4 : 0.25)`;  // off alpha = 0.25
-
       
         if (fillEl) fillEl.style.background = rgba;
         if (pctEl) pctEl.textContent = `${pct}%`;
@@ -168,7 +167,7 @@ class LightGroupCard extends HTMLElement {
           const pct = Math.max(0, Math.min(100, Math.round((x / rect.width) * 100)));
           commitBrightness(pct, false);
       
-          if (Math.abs(x - rect.width/2) > 2) dragState.dragged = true; // mark as dragged
+          dragState.dragged = true; // mark as dragged
         };
       
         const up = ev => {
@@ -273,16 +272,10 @@ class LightGroupCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
 
-    const bg = getComputedStyle(document.documentElement)
-      .getPropertyValue("--ha-card-background") ||
-      getComputedStyle(document.documentElement)
-      .getPropertyValue("--card-background-color") ||
-      "rgb(28,28,28)";
-    const m = bg.match(/(\d+),\s*(\d+),\s*(\d+)/);
-    const base = m ? m.slice(1).map(Number) : [28,28,28];
-    const off = base.map(v => Math.min(255, Math.round(v * 1.05)));
-    this._defaultRgb = off;
-    const offBg = `rgb(${off.join()})`;
+    const cardBg = getComputedStyle(this).backgroundColor || "rgb(28,28,28)";
+    const rgbMatch = cardBg.match(/(\d+),\s*(\d+),\s*(\d+)/);
+    const cardRgb = rgbMatch ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])] : [28,28,28];
+    const offBg = `rgb(${Math.min(255, cardRgb[0] + 13)}, ${Math.min(255, cardRgb[1] + 13)}, ${Math.min(255, cardRgb[2] + 13)})`;
 
     // ---------- inside set hass(hass) ----------
     this.shadowRoot.querySelectorAll(".header").forEach(hdr => {
