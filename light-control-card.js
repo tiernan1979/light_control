@@ -1,12 +1,12 @@
 /* -------------------------------------------------
    light-group-card.js
-   – Full bar coloured
+   – Full bar coloured (solid color)
    – Icon opens colour picker (group + individuals)
-   – Chevron-down expands (mobile-friendly)
+   – Chevron toggles >/v
    – Drag = brightness (1 %), off only at 0 %
    – Single click anywhere else = toggle on/off
    – Text colour adapts to light colour
-   – Uses AirconControlCard clone-and-reattach pattern
+   – Padding between groups configurable in YAML
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
   constructor() {
@@ -22,6 +22,7 @@ class LightGroupCard extends HTMLElement {
 
     this.config = config;
     const barHeight = config.bar_height || 48;
+    const groupPadding = config.group_padding || 8;
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -34,7 +35,7 @@ class LightGroupCard extends HTMLElement {
           display:block;
           user-select:none;
         }
-        .group{margin-bottom:12px;}
+        .group{margin-bottom:${groupPadding}px;}
         .header{
           position:relative;
           display:flex;
@@ -45,18 +46,14 @@ class LightGroupCard extends HTMLElement {
           border-radius:12px;
           cursor:pointer;
           overflow:hidden;
-          background:linear-gradient(to right,
-            var(--gradient-dark) 0%,
-            var(--gradient-start) var(--percent),
-            var(--light-gradient-end) var(--percent),
-            var(--light-gradient-end) 100%
-          );
+          background:var(--light-color,#333);
           box-shadow:0 2px 4px rgba(0,0,0,.3),inset 0 1px 2px rgba(255,255,255,.1);
+          transition:background .2s, color .2s;
         }
         .header.off{background:#333;}
-        .header ha-icon.icon{font-size:24px;cursor:pointer;}
+        .header ha-icon.icon{font-size:24px;cursor:pointer;pointer-events:auto; z-index:2;}
         .header .name{flex:1;font-weight:500;}
-        .header .lux{font-size:14px;color:#ccc;cursor:pointer;}
+        .header .lux{font-size:14px;cursor:pointer;}
         .header .percent{
           position:absolute;
           right:56px;
@@ -71,14 +68,16 @@ class LightGroupCard extends HTMLElement {
           cursor:pointer;
           padding:6px;
           transition:transform .2s;
+          pointer-events:auto;
+          z-index:2;
         }
-        .header .chevron:active{opacity:0.7;}
         .header.expanded .chevron{transform:rotate(180deg);}
         .slider-track{
           position:absolute;
           inset:0;
           border-radius:12px;
           cursor:pointer;
+          z-index:1;
         }
         .individuals{
           margin-top:8px;
@@ -104,7 +103,7 @@ class LightGroupCard extends HTMLElement {
             <span class="name">${g.name}</span>
             ${lux}
             <span class="percent">0%</span>
-            <ha-icon class="chevron" icon="mdi:chevron-down"></ha-icon>
+            <ha-icon class="chevron" icon="mdi:chevron-right"></ha-icon>
             <div class="slider-track"></div>
           </div>
           <div class="individuals"></div>
@@ -125,7 +124,6 @@ class LightGroupCard extends HTMLElement {
       let chevron = header.querySelector(".chevron");
       const isGroup = header.dataset.type === "group";
 
-      // ---- Clone & re-attach ----
       [track, icon, chevron].forEach(el => {
         if (!el) return;
         const clone = el.cloneNode(true);
@@ -137,14 +135,11 @@ class LightGroupCard extends HTMLElement {
 
       this._dragging[entity] = false;
 
-      // ---- FULL TRACK CLICK & DRAG ----
       const set = (clientX, commit = false) => {
         const r = track.getBoundingClientRect();
         const off = clientX - r.left;
         const pct = Math.max(0, Math.min(100, Math.round((off / r.width) * 100)));
-        header.style.setProperty("--percent", pct + "%");
         header.querySelector(".percent").textContent = pct + "%";
-        header.classList.toggle("off", pct === 0);
         if (commit) {
           if (pct > 0) {
             this._hass.callService("light", "turn_on", {
@@ -157,16 +152,12 @@ class LightGroupCard extends HTMLElement {
         }
       };
 
-      track.addEventListener("click", e => {
-        e.stopPropagation();
-        set(e.clientX, true);
-      });
+      track.addEventListener("click", e => { e.stopPropagation(); set(e.clientX, true); });
 
       track.addEventListener("pointerdown", e => {
         e.stopPropagation();
         this._dragging[entity] = true;
         track.setPointerCapture(e.pointerId);
-
         const move = ev => this._dragging[entity] && set(ev.clientX);
         const up = ev => {
           if (!this._dragging[entity]) return;
@@ -177,21 +168,18 @@ class LightGroupCard extends HTMLElement {
           track.removeEventListener("pointerup", up);
           track.removeEventListener("pointercancel", up);
         };
-
         track.addEventListener("pointermove", move);
         track.addEventListener("pointerup", up);
         track.addEventListener("pointercancel", up);
       });
 
-      // ---- ICON = MORE INFO ----
       icon.addEventListener("click", e => {
         e.stopPropagation();
-        const ev = new Event("hass-more-info", { bubbles: true, composed: true });
+        const ev = new Event("hass-more-info", { bubbles:true, composed:true });
         ev.detail = { entityId: entity };
         this.dispatchEvent(ev);
       });
 
-      // ---- CHEVRON = EXPAND / COLLAPSE ----
       if (isGroup && chevron) {
         chevron.addEventListener("click", e => {
           e.stopPropagation();
@@ -199,29 +187,24 @@ class LightGroupCard extends HTMLElement {
           const expanded = grp.classList.toggle("expanded");
           const individuals = grp.querySelector(".individuals");
           individuals.classList.toggle("show", expanded);
+          chevron.setAttribute("icon", expanded ? "mdi:chevron-down" : "mdi:chevron-right");
           if (expanded) this._loadIndividuals(grp.dataset.entity, individuals);
         });
       }
 
-      // ---- SINGLE CLICK ANYWHERE ELSE = TOGGLE ----
       header.addEventListener("click", e => {
         if (
           e.target.closest(".icon") ||
           e.target.closest(".chevron") ||
           e.target.closest(".lux") ||
           e.target.closest(".slider-track")
-        )
-          return;
+        ) return;
 
         const st = this._hass.states[entity];
         const bri = st?.attributes?.brightness || 0;
         const isOn = st?.state === "on" && bri > 0;
 
-        this._hass.callService(
-          "light",
-          isOn ? "turn_off" : "turn_on",
-          { entity_id: entity }
-        );
+        this._hass.callService("light", isOn ? "turn_off" : "turn_on", { entity_id: entity });
       });
     });
   }
@@ -234,14 +217,8 @@ class LightGroupCard extends HTMLElement {
     const ids = group?.attributes?.entity_id || [];
     const all = [];
 
-    ids.forEach(id => {
-      const s = this._hass.states[id];
-      if (s) all.push({ entity: id, state: s });
-    });
-    manual.forEach(m => {
-      const s = this._hass.states[m.entity];
-      if (s) all.push({ entity: m.entity, state: s, name: m.name, icon: m.icon });
-    });
+    ids.forEach(id => { const s=this._hass.states[id]; if(s) all.push({entity:id,state:s}); });
+    manual.forEach(m => { const s=this._hass.states[m.entity]; if(s) all.push({entity:m.entity,state:s,name:m.name,icon:m.icon}); });
 
     const seen = new Set();
     const uniq = all.filter(l => !seen.has(l.entity) && seen.add(l.entity));
@@ -250,10 +227,9 @@ class LightGroupCard extends HTMLElement {
     uniq.forEach(l => {
       const st = l.state;
       const on = st.state === "on";
-      const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness / 2.55) : 0;
+      const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness/2.55) : 0;
       const name = l.name || st.attributes.friendly_name || l.entity.split(".").pop();
       const icon = l.icon || st.attributes.icon || "mdi:lightbulb";
-
       const html = `
         <div class="item" data-entity="${l.entity}">
           <div class="header off">
@@ -279,86 +255,29 @@ class LightGroupCard extends HTMLElement {
       if (!st) return;
 
       const on = st.state === "on";
-      const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness / 2.55) : 0;
-      const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : null;
-      const hex = rgb ? this._rgbToHex(rgb) : "#555";
+      const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : [85,85,85];
+      const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness/2.55) : 0;
+      const hex = `#${rgb.map(v => v.toString(16).padStart(2,"0")).join("")}`;
 
-      const key = `${on}|${bri}|${hex}`;
-      if (this._lastStates[entity] !== key) {
-        const hdr = el.tagName === "DIV" && el.classList.contains("header")
-          ? el
-          : el.querySelector(".header");
+      const hdr = el.tagName==="DIV" && el.classList.contains("header") ? el : el.querySelector(".header");
 
-        const bgHex = on
-          ? this._shade(hex, Math.round((bri / 100) * 50 - 25))
-          : "#333";
-
-        const dark = this._rgba(this._shade(bgHex, -40), 0.3);
-        const start = this._rgba(bgHex, 0.7);
-        const light = this._rgba(this._shade(bgHex, 50), 0.1);
-
-        hdr.style.setProperty("--gradient-dark", dark);
-        hdr.style.setProperty("--gradient-start", start);
-        hdr.style.setProperty("--light-gradient-end", light);
-        hdr.style.setProperty("--percent", bri + "%");
-        hdr.querySelector(".percent").textContent = bri + "%";
-        hdr.classList.toggle("off", bri === 0);
-
-        // ---- Dynamic text colour ----
-        const { r, g, b } = this._hexToRgb(bgHex);
-        const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-        const textColor = lum > 0.5 ? "#000" : "#fff";
-
-        hdr.style.color = textColor;
-        hdr.querySelectorAll("ha-icon, .name, .lux, .percent").forEach(el => {
-          el.style.color = textColor;
-        });
-
-        this._lastStates[entity] = key;
-      }
+      hdr.style.setProperty("--light-color", on ? hex : "#333");
+      const lum = (0.299*rgb[0]+0.587*rgb[1]+0.114*rgb[2])/255;
+      const textColor = lum>0.7 ? "#333" : "#fff";
+      hdr.style.color=textColor;
+      hdr.querySelectorAll("ha-icon, .name, .lux, .percent").forEach(el=>el.style.color=textColor);
+      hdr.querySelector(".percent").textContent = bri+"%";
+      hdr.classList.toggle("off", !on || bri===0);
 
       const lux = el.querySelector(".lux");
-      if (lux) {
-        const s = hass.states[lux.dataset.entity];
-        const v = s && !isNaN(s.state) ? Math.round(+s.state) : null;
-        lux.textContent = v !== null ? `${v} lx` : "-- lx";
-      }
+      if(lux){ const s=hass.states[lux.dataset.entity]; const v=s&&!isNaN(s.state)?Math.round(+s.state):null; lux.textContent=v!==null?`${v} lx`:"-- lx"; }
 
       const grp = el.closest(".group");
-      if (grp && grp.classList.contains("expanded")) {
-        this._loadIndividuals(grp.dataset.entity, grp.querySelector(".individuals"));
-      }
+      if(grp && grp.classList.contains("expanded")) this._loadIndividuals(grp.dataset.entity, grp.querySelector(".individuals"));
     });
   }
 
-  /* -------------------------------------------------
-     HELPERS
-  ------------------------------------------------- */
-  _shade(hex, pct) {
-    let [r, g, b] = hex.slice(1).match(/.{2}/g).map(v => parseInt(v, 16));
-    r = Math.min(255, Math.max(0, Math.round((r * (100 + pct)) / 100)));
-    g = Math.min(255, Math.max(0, Math.round((g * (100 + pct)) / 100)));
-    b = Math.min(255, Math.max(0, Math.round((b * (100 + pct)) / 100)));
-    return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
-  }
-
-  _rgbToHex(rgb) {
-    return `#${rgb.map(v => v.toString(16).padStart(2, "0")).join("")}`;
-  }
-
-  _hexToRgb(hex) {
-    const [r, g, b] = hex.slice(1).match(/.{2}/g).map(x => parseInt(x, 16));
-    return { r, g, b };
-  }
-
-  _rgba(hex, alpha) {
-    const { r, g, b } = this._hexToRgb(hex);
-    return `rgba(${r},${g},${b},${alpha})`;
-  }
-
-  getCardSize() {
-    return this.config.groups.length;
-  }
+  getCardSize() { return this.config.groups.length; }
 }
 
 customElements.define("light-group-card", LightGroupCard);
