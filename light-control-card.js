@@ -175,7 +175,7 @@ class LightGroupCard extends HTMLElement {
 
       this._dragging[entity] = { active: false, lastPct: 0, lastRgb: this._defaultRgb };
 
-      const updateBrightness = async (clientX, commit = false) => {
+      const updateBrightness = (clientX, commit = false) => {
         const rect = track.getBoundingClientRect();
         const offsetX = clientX - rect.left;
         const width = rect.width;
@@ -197,20 +197,20 @@ class LightGroupCard extends HTMLElement {
           this._dragging[entity].lastPct = pct;
           this._dragging[entity].lastRgb = rgb;
       
-          // ✅ FIX: only turn_off at exact 0%
           if (pct <= 0) {
             this._hass.callService("light", "turn_off", { entity_id: entity });
           } else {
-            // ✅ Force turn_on first, then brightness update
-            await this._hass.callService("light", "turn_on", { entity_id: entity });
-            await new Promise(r => setTimeout(r, 100));
-            await this._hass.callService("light", "turn_on", {
+            // ✅ only turn_on if off; otherwise just adjust brightness
+            const isOn = st && st.state === "on";
+            this._hass.callService("light", "turn_on", {
               entity_id: entity,
-              brightness_pct: pct
+              brightness_pct: pct,
+              transition: isOn ? 0.2 : 0.5
             });
           }
         }
       };
+
 
 
 
@@ -266,18 +266,20 @@ class LightGroupCard extends HTMLElement {
       // FIXED: Group click = turn ALL ON
       header.addEventListener("click", e => {
         if (e.target.closest(".icon") || e.target.closest(".chevron") || e.target.closest(".lux")) return;
-
+      
         const st = this._hass.states[entity];
-        const allOn = st && st.attributes && st.attributes.entity_id
-          ? st.attributes.entity_id.every(id => this._hass.states[id]?.state === "on")
-          : false;
-
-        if (allOn) {
-          // All ON → turn OFF
-          this._hass.callService("light", "turn_off", { entity_id: entity });
+        const isGroup = header.dataset.type === "group";
+      
+        if (isGroup) {
+          // GROUP: toggle all
+          const allOn = st && st.attributes && st.attributes.entity_id
+            ? st.attributes.entity_id.every(id => this._hass.states[id]?.state === "on")
+            : false;
+          this._hass.callService("light", allOn ? "turn_off" : "turn_on", { entity_id: entity });
         } else {
-          // Any OFF → turn ALL ON
-          this._hass.callService("light", "turn_on", { entity_id: entity });
+          // INDIVIDUAL: toggle
+          const turnOn = !st || st.state === "off";
+          this._hass.callService("light", turnOn ? "turn_on" : "turn_off", { entity_id: entity });
         }
       });
     });
@@ -324,79 +326,94 @@ class LightGroupCard extends HTMLElement {
     this._attachAll();
   }
 
-  set hass(hass) {
-    this._hass = hass;
+set hass(hass) {
+  this._hass = hass;
 
-    const cardBgRaw = getComputedStyle(document.documentElement)
-      .getPropertyValue("--ha-card-background")
-      || getComputedStyle(document.documentElement)
-      .getPropertyValue("--card-background-color")
-      || "rgb(28,28,28)";
-      
-    const rgbMatch = cardBgRaw.match(/(\d+),\s*(\d+),\s*(\d+)/);
-    const cardRgb = rgbMatch
-      ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])]
-      : [28, 28, 28];
-      
-    // ✅ Slightly lighter (5%) than card color
-    const offBg = `rgb(
-      ${Math.min(255, Math.round(cardRgb[0] * 1.05))},
-      ${Math.min(255, Math.round(cardRgb[1] * 1.05))},
-      ${Math.min(255, Math.round(cardRgb[2] * 1.05))}
-    )`;
+  // ✅ Get the card background color from theme
+  const cardBgRaw = getComputedStyle(document.documentElement)
+    .getPropertyValue("--ha-card-background")
+    || getComputedStyle(document.documentElement)
+    .getPropertyValue("--card-background-color")
+    || "rgb(28,28,28)";
 
-    this.shadowRoot.querySelectorAll(".item, .group > .header").forEach(el => {
-      const entity = el.dataset.entity || el.closest(".group").dataset.entity;
-      if (!entity) return;
+  const rgbMatch = cardBgRaw.match(/(\d+),\s*(\d+),\s*(\d+)/);
+  const cardRgb = rgbMatch
+    ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])]
+    : [28, 28, 28];
 
-      const st = hass.states[entity];
-      if (!st) return;
+  // ✅ Slightly lighter (5%) than card color
+  const offBg = `rgb(
+    ${Math.min(255, Math.round(cardRgb[0] * 1.05))},
+    ${Math.min(255, Math.round(cardRgb[1] * 1.05))},
+    ${Math.min(255, Math.round(cardRgb[2] * 1.05))}
+  )`;
 
-      const on = st.state === "on";
-      const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness / 2.55) : 0;
-      const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : this._defaultRgb;
-      const hex = this._rgbToHex(rgb);
+  // ✅ Store this derived color as the new default RGB (so individuals use it too)
+  this._defaultRgb = [
+    Math.min(255, Math.round(cardRgb[0] * 1.05)),
+    Math.min(255, Math.round(cardRgb[1] * 1.05)),
+    Math.min(255, Math.round(cardRgb[2] * 1.05))
+  ];
 
-      const key = `${on}|${bri}|${hex}`;
-      if (this._lastStates[entity] !== key) {
-        const hdr = el.tagName === "DIV" && el.classList.contains("header") ? el : el.querySelector(".header");
-        const fill = hdr.querySelector(".slider-fill");
-        const percentEl = hdr.querySelector(".percent");
-        const icon = hdr.querySelector(".icon");
+  this.shadowRoot.querySelectorAll(".item, .group > .header").forEach(el => {
+    const entity = el.dataset.entity || el.closest(".group").dataset.entity;
+    if (!entity) return;
 
-        hdr.style.setProperty("--off-bg", offBg);
-        if (!on) {
-          hdr.style.background = offBg;
-        }
+    const st = hass.states[entity];
+    if (!st) return;
 
-        const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.4)`;
-        hdr.style.setProperty("--light-fill", fillRgba);
-        fill.style.background = fillRgba;
+    const on = st.state === "on";
+    const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness / 2.55) : 0;
 
-        const hsl = this._rgbToHsl(rgb[0], rgb[1], rgb[2]);
-        const lightHsl = `hsl(${hsl.h}, ${hsl.s}%, ${Math.min(100, hsl.l + 60)}%)`;
-        icon.style.color = lightHsl;
+    // ✅ Use defaultRgb when off
+    const rgb = (on && st.attributes.rgb_color)
+      ? st.attributes.rgb_color
+      : this._defaultRgb;
 
-        hdr.style.setProperty("--percent", bri + "%");
-        percentEl.textContent = bri + "%";
+    const hex = this._rgbToHex(rgb);
 
-        const chevron = hdr.querySelector(".chevron");
-        if (chevron) {
-          const expanded = hdr.closest(".group")?.classList.contains("expanded");
-          chevron.setAttribute("icon", expanded ? "mdi:chevron-down" : "mdi:chevron-right");
-        }
+    const key = `${on}|${bri}|${hex}`;
+    if (this._lastStates[entity] !== key) {
+      const hdr = el.tagName === "DIV" && el.classList.contains("header") ? el : el.querySelector(".header");
+      const fill = hdr.querySelector(".slider-fill");
+      const percentEl = hdr.querySelector(".percent");
+      const icon = hdr.querySelector(".icon");
 
-        this._lastStates[entity] = key;
+      hdr.style.setProperty("--off-bg", offBg);
+      if (!on) {
+        hdr.style.background = offBg;
       }
 
-      const lux = el.querySelector(".lux");
-      if (lux) {
-        const s = hass.states[lux.dataset.entity];
-        const v = s && !isNaN(s.state) ? Math.round(+s.state) : null;
-        lux.textContent = v !== null ? `${v} lx` : "-- lx";
+      // ✅ Use dimmer fill for off state
+      const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${on ? 0.4 : 0.25})`;
+      hdr.style.setProperty("--light-fill", fillRgba);
+      fill.style.background = fillRgba;
+
+      const hsl = this._rgbToHsl(rgb[0], rgb[1], rgb[2]);
+      const lightHsl = `hsl(${hsl.h}, ${hsl.s}%, ${Math.min(100, hsl.l + 60)}%)`;
+      icon.style.color = lightHsl;
+
+      hdr.style.setProperty("--percent", bri + "%");
+      percentEl.textContent = bri + "%";
+
+      const chevron = hdr.querySelector(".chevron");
+      if (chevron) {
+        const expanded = hdr.closest(".group")?.classList.contains("expanded");
+        chevron.setAttribute("icon", expanded ? "mdi:chevron-down" : "mdi:chevron-right");
       }
-    });
-  }
+
+      this._lastStates[entity] = key;
+    }
+
+    const lux = el.querySelector(".lux");
+    if (lux) {
+      const s = hass.states[lux.dataset.entity];
+      const v = s && !isNaN(s.state) ? Math.round(+s.state) : null;
+      lux.textContent = v !== null ? `${v} lx` : "-- lx";
+    }
+  });
+}
+
 
   /* -------------------------------------------------
      HELPERS
