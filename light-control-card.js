@@ -14,7 +14,17 @@ class LightGroupCard extends HTMLElement {
     this._dragging = {};
     this._lastStates = {};
     this._expandedCache = new Set();
-    this._defaultRgb = [85, 85, 85];
+    // ✅ derive default color from card background (5% lighter)
+    const cardBgRaw = getComputedStyle(document.documentElement)
+      .getPropertyValue("--ha-card-background")
+      || getComputedStyle(document.documentElement)
+      .getPropertyValue("--card-background-color")
+      || "rgb(28,28,28)";
+    const rgbMatch = cardBgRaw.match(/(\d+),\s*(\d+),\s*(\d+)/);
+    const baseRgb = rgbMatch
+      ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])]
+      : [28, 28, 28];
+    this._defaultRgb = baseRgb.map(v => Math.min(255, Math.round(v * 1.05)));
     this.attachShadow({ mode: "open" });
   }
 
@@ -165,7 +175,7 @@ class LightGroupCard extends HTMLElement {
 
       this._dragging[entity] = { active: false, lastPct: 0, lastRgb: this._defaultRgb };
 
-      const updateBrightness = (clientX, commit = false) => {
+      const updateBrightness = async (clientX, commit = false) => {
         const rect = track.getBoundingClientRect();
         const offsetX = clientX - rect.left;
         const width = rect.width;
@@ -187,18 +197,21 @@ class LightGroupCard extends HTMLElement {
           this._dragging[entity].lastPct = pct;
           this._dragging[entity].lastRgb = rgb;
       
-          // ✅ FIX: only turn_off when at absolute 0%
-          // otherwise always turn_on with exact brightness
+          // ✅ FIX: only turn_off at exact 0%
           if (pct <= 0) {
             this._hass.callService("light", "turn_off", { entity_id: entity });
           } else {
-            this._hass.callService("light", "turn_on", {
+            // ✅ Force turn_on first, then brightness update
+            await this._hass.callService("light", "turn_on", { entity_id: entity });
+            await new Promise(r => setTimeout(r, 100));
+            await this._hass.callService("light", "turn_on", {
               entity_id: entity,
               brightness_pct: pct
             });
           }
         }
       };
+
 
 
 
