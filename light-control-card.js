@@ -2,7 +2,7 @@
    light-group-card.js
    – slider colour = current light colour
    – off → grey, on → full colour + glow
-   – expandable individual lights
+   – expandable individual lights (auto + manual)
    – optional lux sensor per room
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
@@ -104,8 +104,9 @@ class LightGroupCard extends HTMLElement {
     let html = "";
     config.groups.forEach(g => {
       const luxPart = g.lux_sensor ? `<span class="lux" data-entity="${g.lux_sensor}">-- lx</span>` : '';
+      const manualLights = JSON.stringify(g.lights || []).replace(/"/g, '&quot;');
       html += `
-        <div class="group" data-entity="${g.entity}">
+        <div class="group" data-entity="${g.entity || ''}" data-manual-lights="${manualLights}">
           <div class="group-header">
             <ha-icon icon="${g.icon || 'mdi:lightbulb-group'}"></ha-icon>
             <span class="name">${g.name}</span>
@@ -212,17 +213,48 @@ class LightGroupCard extends HTMLElement {
   }
 
   /* -------------------------------------------------
-     INDIVIDUAL LIGHTS
+     INDIVIDUAL LIGHTS – AUTO + MANUAL
   ------------------------------------------------- */
   _loadIndividuals(groupId, container) {
     if (!this._hass) return;
-    const group = this._hass.states[groupId];
-    if (!group || !group.attributes.entity_id) return;
+    const groupEl = container.closest('.group');
+    const manualLights = JSON.parse(groupEl.dataset.manualLights.replace(/&quot;/g, '"'));
+    const group = groupId ? this._hass.states[groupId] : null;
+    const groupEntities = group?.attributes?.entity_id || [];
+
+    const allLights = [];
+
+    // Add group lights
+    groupEntities.forEach(id => {
+      const st = this._hass.states[id];
+      if (st) allLights.push({ entity: id, state: st });
+    });
+
+    // Add manual lights
+    manualLights.forEach(m => {
+      const st = this._hass.states[m.entity];
+      if (st) {
+        allLights.push({
+          entity: m.entity,
+          state: st,
+          name: m.name,
+          icon: m.icon
+        });
+      }
+    });
+
+    // Deduplicate
+    const seen = new Set();
+    const uniqueLights = allLights.filter(l => {
+      if (seen.has(l.entity)) return false;
+      seen.add(l.entity);
+      return true;
+    });
+
     container.innerHTML = "";
 
-    group.attributes.entity_id.forEach(id => {
-      const st = this._hass.states[id];
-      if (!st) return;
+    uniqueLights.forEach(l => {
+      const st = l.state;
       const on = st.state === 'on';
       const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness/2.55) : 0;
       const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : null;
@@ -231,10 +263,13 @@ class LightGroupCard extends HTMLElement {
       const start = this._rgba(hex,0.7);
       const light = this._rgba(this._shade(hex,50),0.1);
 
+      const name = l.name || st.attributes.friendly_name || l.entity;
+      const icon = l.icon || st.attributes.icon || 'mdi:lightbulb';
+
       const html = `
-        <div class="ind-light" data-entity="${id}">
-          <ha-icon icon="${st.attributes.icon||'mdi:lightbulb'}"></ha-icon>
-          <span class="ind-name">${st.attributes.friendly_name||id}</span>
+        <div class="ind-light" data-entity="${l.entity}">
+          <ha-icon icon="${icon}"></ha-icon>
+          <span class="ind-name">${name}</span>
           <div class="ind-toggle ${on?'on':''}"><ha-icon icon="mdi:power"></ha-icon></div>
           <input type="range" class="ind-slider" min="0" max="100" step="5" value="${bri}"
                  style="--ind-dark:${dark};--ind-start:${start};--ind-light:${light};--ind-percent:${bri}%">
@@ -243,7 +278,7 @@ class LightGroupCard extends HTMLElement {
       container.insertAdjacentHTML('beforeend', html);
     });
 
-    // attach listeners
+    // Attach listeners
     container.querySelectorAll('.ind-toggle').forEach(t => {
       t.addEventListener('click', () => {
         const entity = t.closest('.ind-light').dataset.entity;
@@ -304,12 +339,10 @@ class LightGroupCard extends HTMLElement {
 
     this.shadowRoot.querySelectorAll('.group').forEach(g => {
       const entity = g.dataset.entity;
-      const state = hass.states[entity];
-      if (!state) return;
-
-      const on = state.state === 'on';
-      const bri = on && state.attributes.brightness ? Math.round(state.attributes.brightness/2.55) : 0;
-      const rgb = on && state.attributes.rgb_color ? state.attributes.rgb_color : null;
+      const state = entity ? hass.states[entity] : null;
+      const on = state?.state === 'on';
+      const bri = on && state?.attributes.brightness ? Math.round(state.attributes.brightness/2.55) : 0;
+      const rgb = on && state?.attributes.rgb_color ? state.attributes.rgb_color : null;
       const hex = rgb ? this._rgbToHex(rgb) : '#555';
       const key = `${on}|${bri}|${hex}`;
 
