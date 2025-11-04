@@ -1,11 +1,11 @@
 /* -------------------------------------------------
    light-group-card.js
-   – Solid colour slider (matches light)
-   – Icon & chevron always clickable (z-index 2)
-   – Card background = theme
-   – Dynamic text colour (readable on any light)
+   – Solid colour fill (group + individuals)
+   – Dynamic text/ icon colour (readable at 50%)
+   – Chevron: > (collapsed) / down arrow (expanded)
+   – Single click = toggle
    – Drag = brightness (1 %), off only at 0 %
-   – Click = toggle | Icon = more-info | Chevron = expand
+   – Icon = more-info | Chevron = expand
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
   constructor() {
@@ -47,7 +47,7 @@ class LightGroupCard extends HTMLElement {
           box-shadow: 0 2px 4px rgba(0,0,0,.3), inset 0 1px 2px rgba(255,255,255,.1);
         }
         .header.off { background: #333; }
-        
+
         /* ICON & CHEVRON – always on top */
         .header ha-icon.icon,
         .header ha-icon.chevron {
@@ -63,9 +63,8 @@ class LightGroupCard extends HTMLElement {
           transition: transform .2s;
         }
         .header .chevron:active { opacity: 0.7; }
-        .header.expanded .chevron { transform: rotate(180deg); }
 
-        .header .name { flex: 1; font-weight: 500; position: relative; }
+        .header .name { flex: 1; font-weight: 500; z-index: 2; position: relative; }
         .header .lux { font-size: 14px; color: #ccc; cursor: pointer; z-index: 2; position: relative; }
         .header .percent {
           position: absolute;
@@ -75,9 +74,10 @@ class LightGroupCard extends HTMLElement {
           font-size: 14px;
           font-weight: bold;
           pointer-events: none;
+          z-index: 2;
         }
 
-        /* SLIDER – solid fill, behind icons */
+        /* SOLID FILL */
         .slider-fill {
           position: absolute;
           left: 0; top: 0; height: 100%;
@@ -95,10 +95,7 @@ class LightGroupCard extends HTMLElement {
           z-index: 1;
         }
 
-        .individuals {
-          margin-top: 8px;
-          display: none;
-        }
+        .individuals { margin-top: 8px; display: none; }
         .individuals.show { display: block; }
       </style>
       <div class="groups"></div>
@@ -119,7 +116,7 @@ class LightGroupCard extends HTMLElement {
             <span class="name">${g.name}</span>
             ${lux}
             <span class="percent">0%</span>
-            <ha-icon class="chevron" icon="mdi:chevron-down"></ha-icon>
+            <ha-icon class="chevron" icon="mdi:chevron-right"></ha-icon>
             <div class="slider-fill"></div>
             <div class="slider-track"></div>
           </div>
@@ -142,7 +139,7 @@ class LightGroupCard extends HTMLElement {
       let chevron = header.querySelector(".chevron");
       const isGroup = header.dataset.type === "group";
 
-      // Clone & re-attach to prevent duplicates
+      // Clone & re-attach
       [track, fill, icon, chevron].forEach(el => {
         if (!el) return;
         const clone = el.cloneNode(true);
@@ -200,7 +197,7 @@ class LightGroupCard extends HTMLElement {
         header.dispatchEvent(ev);
       });
 
-      // --- CHEVRON = EXPAND ---
+      // --- CHEVRON = EXPAND / COLLAPSE ---
       if (isGroup && chevron) {
         chevron.addEventListener("click", e => {
           e.stopPropagation();
@@ -208,11 +205,12 @@ class LightGroupCard extends HTMLElement {
           const expanded = grp.classList.toggle("expanded");
           const individuals = grp.querySelector(".individuals");
           individuals.classList.toggle("show", expanded);
+          chevron.setAttribute("icon", expanded ? "mdi:chevron-down" : "mdi:chevron-right");
           if (expanded) this._loadIndividuals(grp.dataset.entity, individuals);
         });
       }
 
-      // --- CLICK ANYWHERE ELSE = TOGGLE ---
+      // --- SINGLE CLICK ANYWHERE ELSE = TOGGLE ---
       header.addEventListener("click", e => {
         if (e.target.closest(".icon") || e.target.closest(".chevron") || e.target.closest(".lux")) return;
         const st = this._hass.states[entity];
@@ -291,12 +289,21 @@ class LightGroupCard extends HTMLElement {
         hdr.querySelector(".percent").textContent = bri + "%";
         hdr.classList.toggle("off", bri === 0);
 
-        // Dynamic text color (readable on any background)
+        // Dynamic text color – readable at 50%
         const { r, g, b } = this._hexToRgb(hex);
         const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-        const textColor = lum > 0.5 ? "#000" : "#fff";
+        const textColor = lum > 0.55 ? "#000" : "#fff";  // Slightly higher threshold
         hdr.style.color = textColor;
-        hdr.querySelectorAll("ha-icon, .name, .lux, .percent").forEach(e => e.style.color = textColor);
+        hdr.querySelectorAll("ha-icon, .name, .lux, .percent").forEach(e => {
+          e.style.color = textColor;
+        });
+
+        // Update chevron icon
+        const chevron = hdr.querySelector(".chevron");
+        if (chevron) {
+          const isExpanded = hdr.closest(".group")?.classList.contains("expanded");
+          chevron.setAttribute("icon", isExpanded ? "mdi:chevron-down" : "mdi:chevron-right");
+        }
 
         this._lastStates[entity] = key;
       }
