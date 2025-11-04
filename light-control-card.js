@@ -14,7 +14,15 @@ class LightGroupCard extends HTMLElement {
        const st = this._hass.states[entity];
        if (!st) return;
        const dragState = this._dragging[entity];
-       if (dragState?.active) return; // skip updating while dragging
+       if (dragState?.active) {
+           // Use the dragging value instead of HA state
+           const pct = dragState.lastPct ?? 0;
+           const fillEl = hdr.querySelector(".slider-fill");
+           const pctEl  = hdr.querySelector(".percent");
+           fillEl.style.width = `${pct}%`;
+           pctEl.textContent = `${pct}%`;
+           return;  // skip rest of update
+       }
        const on = st.state === "on";
        const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness / 2.55) : 0;
    
@@ -128,33 +136,26 @@ class LightGroupCard extends HTMLElement {
 
       // ---------- commitBrightness inside _attachHandlers ----------
       const commitBrightness = (pct, commit) => {
-          header.style.setProperty("--pct", `${pct}%`);
-          const fillEl = header.querySelector(".slider-fill");
-          const pctEl = header.querySelector(".percent");
+        // update UI immediately
+        header.style.setProperty("--pct", `${pct}%`);
+        const fillEl = header.querySelector(".slider-fill");
+        const pctEl = header.querySelector(".percent");
+        if (fillEl) fillEl.style.width = `${pct}%`;
+        if (pctEl) pctEl.textContent = `${pct}%`;
       
-          const state = entity ? this._hass.states[entity] : null;
-          const isOn = state?.state === "on";
+        // only commit to HA when released
+        if (commit && entity) {
+          // always use brightness >= 1
+          const brightness = Math.max(pct, 1);
+          this._hass.callService("light", "turn_on", {
+            entity_id: entity,
+            brightness_pct: brightness
+            // DO NOT set rgb_color here
+          });
+        }
       
-          // Update slider fill even if light is off
-          const alpha = pct > 0 ? 0.4 : 0.25;
-          if (fillEl) fillEl.style.background = `rgba(${this._defaultRgb[0]},${this._defaultRgb[1]},${this._defaultRgb[2]},${alpha})`;
-          if (pctEl) pctEl.textContent = `${pct}%`;
-      
-          if (commit && entity) {
-              if (pct > 0) {
-                  // Turn on light at specified brightness
-                  this._hass.callService("light", "turn_on", {
-                      entity_id: entity,
-                      brightness_pct: pct
-                  });
-              } else if (isOn && pct === 0) {
-                  // Optional: don’t turn off when dragging to 0, just show UI
-              }
-          }
-      
-          // Remember last dragged value
-          if (!this._dragging[entity]) this._dragging[entity] = {};
-          this._dragging[entity].lastPct = pct;
+        // remember last drag value
+        if (this._dragging[entity]) this._dragging[entity].lastPct = pct;
       };
 
 
@@ -173,7 +174,7 @@ class LightGroupCard extends HTMLElement {
           let pct = ((ev.clientX - rect.left) / rect.width) * 100;
           pct = Math.max(0, Math.min(100, Math.round(pct)));
           commitBrightness(pct, false);
-      
+          dragState.lastPct = pct;  // inside move()
           dragState.dragged = true; // mark as dragged
         };
       
@@ -186,8 +187,8 @@ class LightGroupCard extends HTMLElement {
           pct = Math.max(0, Math.min(100, Math.round(pct)));
       
           // Commit only if pct > 0
-          if (pct > 0) {
-              commitBrightness(pct, true);
+          if (dragState.lastPct > 0) {
+              commitBrightness(dragState.lastPct, true);
           } else {
               commitBrightness(0, false); // just update UI, don't call HA
           }
