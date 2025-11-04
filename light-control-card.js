@@ -1,10 +1,11 @@
 /* -------------------------------------------------
    light-group-card.js
    – Full bar coloured
-   – Icon opens colour picker (group + individuals)
-   – Chevron-down expands group (mobile-friendly)
+   – Icon opens colour picker
+   – Chevron-down expands (mobile)
    – Drag = brightness (1%), off only at 0%
-   – bar_height configurable
+   – Click = toggle (anywhere except icon/chevron)
+   – Uses AirconControlCard pattern
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
   constructor() {
@@ -14,9 +15,6 @@ class LightGroupCard extends HTMLElement {
     this.attachShadow({ mode: "open" });
   }
 
-  /* -------------------------------------------------
-     CONFIG
-  ------------------------------------------------- */
   setConfig(config) {
     if (!config.groups || !Array.isArray(config.groups))
       throw new Error('Define "groups"');
@@ -26,67 +24,67 @@ class LightGroupCard extends HTMLElement {
 
     this.shadowRoot.innerHTML = `
       <style>
-        :host{
-          font-family:'Roboto',sans-serif;
-          background:var(--card-background-color,#000);
-          color:var(--text-color,#fff);
-          border-radius:12px;
-          padding:16px;
-          display:block;
-          user-select:none;
+        :host {
+          font-family: 'Roboto', sans-serif;
+          background: var(--card-background-color, #000);
+          color: var(--text-color, #fff);
+          border-radius: 12px;
+          padding: 16px;
+          display: block;
+          user-select: none;
         }
-        .group{margin-bottom:12px;}
-        .header{
-          position:relative;
-          display:flex;
-          align-items:center;
-          gap:8px;
-          height:${barHeight}px;
-          padding:0 12px;
-          border-radius:12px;
-          cursor:pointer;
-          overflow:hidden;
-          background:linear-gradient(to right,
+        .group { margin-bottom: 12px; }
+        .header {
+          position: relative;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          height: ${barHeight}px;
+          padding: 0 12px;
+          border-radius: 12px;
+          cursor: pointer;
+          overflow: hidden;
+          background: linear-gradient(to right,
             var(--gradient-dark) 0%,
             var(--gradient-start) var(--percent),
             var(--light-gradient-end) var(--percent),
             var(--light-gradient-end) 100%
           );
-          box-shadow:0 2px 4px rgba(0,0,0,.3),inset 0 1px 2px rgba(255,255,255,.1);
+          box-shadow: 0 2px 4px rgba(0,0,0,.3), inset 0 1px 2px rgba(255,255,255,.1);
         }
-        .header.off{background:#333;}
-        .header ha-icon.icon{font-size:24px;cursor:pointer;}
-        .header .name{flex:1;font-weight:500;}
-        .header .lux{font-size:14px;color:#ccc;cursor:pointer;}
-        .header .percent{
-          position:absolute;
-          right:48px; /* moved further from chevron */
-          top:50%;
-          transform:translateY(-50%);
-          font-size:14px;
-          font-weight:bold;
-          pointer-events:none;
+        .header.off { background: #333; }
+        .header ha-icon.icon { font-size: 24px; cursor: pointer; }
+        .header .name { flex: 1; font-weight: 500; }
+        .header .lux { font-size: 14px; color: #ccc; cursor: pointer; }
+        .header .percent {
+          position: absolute;
+          right: 56px;
+          top: 50%;
+          transform: translateY(-50%);
+          font-size: 14px;
+          font-weight: bold;
+          pointer-events: none;
         }
-        .header .chevron{
-          transition:transform .2s;
-          font-size:22px;
-          cursor:pointer;
-          padding:4px; /* larger tap area */
+        .header .chevron {
+          font-size: 22px;
+          cursor: pointer;
+          padding: 6px;
+          transition: transform .2s;
         }
-        .header .chevron:active{opacity:0.7;}
-        .header.expanded .chevron{transform:rotate(180deg);}
-        .header.dark-text{color:#000;}
-        .slider-track{
-          position:absolute;
-          inset:0;
-          border-radius:12px;
-          cursor:pointer;
+        .header .chevron:active { opacity: 0.7; }
+        .header.expanded .chevron { transform: rotate(180deg); }
+        .header.dark-text { color: #000; }
+        .slider-track {
+          position: absolute;
+          inset: 0;
+          border-radius: 12px;
+          cursor: pointer;
         }
-        .individuals{
-          margin-top:8px;
-          display:none;
+        .individuals {
+          margin-top: 8px;
+          display: none;
         }
-        .individuals.show{display:block;}
+        .individuals.show { display: block; }
       </style>
       <div class="groups"></div>
     `;
@@ -95,9 +93,7 @@ class LightGroupCard extends HTMLElement {
     let html = "";
 
     config.groups.forEach(g => {
-      const lux = g.lux_sensor
-        ? `<span class="lux" data-entity="${g.lux_sensor}">-- lx</span>`
-        : "";
+      const lux = g.lux_sensor ? `<span class="lux" data-entity="${g.lux_sensor}">-- lx</span>` : "";
       const manual = JSON.stringify(g.lights || []).replace(/"/g, "&quot;");
       html += `
         <div class="group" data-entity="${g.entity || ""}" data-manual="${manual}">
@@ -117,109 +113,102 @@ class LightGroupCard extends HTMLElement {
     this._attachAll();
   }
 
-  /* -------------------------------------------------
-     LISTENERS
-  ------------------------------------------------- */
   _attachAll() {
-    this.shadowRoot.querySelectorAll(".header").forEach(h => this._attachHeader(h));
-  }
+    this.shadowRoot.querySelectorAll(".header").forEach(header => {
+      const entity = header.parentElement.dataset.entity || header.closest(".group").dataset.entity;
+      if (!entity) return;
 
-  _attachHeader(header) {
-    const entity =
-      header.parentElement.dataset.entity ||
-      header.parentElement.closest(".group").dataset.entity;
-    if (!entity) return;
+      const track = header.querySelector(".slider-track");
+      const pctEl = header.querySelector(".percent");
+      const icon = header.querySelector(".icon");
+      const chevron = header.querySelector(".chevron");
+      const isGroup = header.dataset.type === "group";
 
-    const track = header.querySelector(".slider-track");
-    const pctEl = header.querySelector(".percent");
-    const icon = header.querySelector(".icon");
-    const chevron = header.querySelector(".chevron");
-    const isGroup = header.dataset.type === "group";
+      // --- CLONE & REATTACH (AirconControlCard pattern) ---
+      [icon, chevron, track].forEach(el => {
+        if (!el) return;
+        const clone = el.cloneNode(true);
+        el.parentNode.replaceChild(clone, el);
+        if (el === track) track = clone;
+        if (el === icon) icon = clone;
+        if (el === chevron) chevron = clone;
+      });
 
-    this._dragging[entity] = false;
+      this._dragging[entity] = false;
 
-    /* ---- TAP = TOGGLE (only if not on icon, chevron, or lux) ---- */
-    header.addEventListener("click", e => {
-      if (
-        e.target.closest(".icon") ||
-        e.target.closest(".chevron") ||
-        e.target.closest(".lux")
-      ) return;
-
-      const st = this._hass.states[entity];
-      const turnOn = !st || st.state === "off";
-      this._hass.callService(
-        "light",
-        turnOn ? "turn_on" : "turn_off",
-        { entity_id: entity }
-      );
-    });
-
-    /* ---- SMOOTH DRAG (1% steps, off only at 0) ---- */
-    const set = (clientX, commit = false) => {
-      const r = track.getBoundingClientRect();
-      const off = clientX - r.left;
-      const pct = Math.max(0, Math.min(100, Math.round((off / r.width) * 100)));
-      header.style.setProperty("--percent", pct + "%");
-      pctEl.textContent = pct + "%";
-      header.classList.toggle("off", pct === 0);
-      if (commit) {
-        if (pct > 0)
-          this._hass.callService("light", "turn_on", {
-            entity_id: entity,
-            brightness_pct: pct
-          });
-        else this._hass.callService("light", "turn_off", { entity_id: entity });
-      }
-    };
-
-    track.addEventListener("pointerdown", e => {
-      e.preventDefault();
-      this._dragging[entity] = true;
-      track.setPointerCapture(e.pointerId);
-
-      const move = ev => this._dragging[entity] && set(ev.clientX);
-      const up = () => {
-        if (!this._dragging[entity]) return;
-        this._dragging[entity] = false;
-        track.releasePointerCapture(e.pointerId);
-        set(e.clientX, true);
-        track.removeEventListener("pointermove", move);
-        track.removeEventListener("pointerup", up);
-        track.removeEventListener("pointercancel", up);
+      // --- FULL TRACK CLICK & DRAG ---
+      const set = (clientX, commit = false) => {
+        const r = track.getBoundingClientRect();
+        const off = clientX - r.left;
+        const pct = Math.max(0, Math.min(100, Math.round((off / r.width) * 100)));
+        header.style.setProperty("--percent", pct + "%");
+        pctEl.textContent = pct + "%";
+        header.classList.toggle("off", pct === 0);
+        if (commit) {
+          if (pct > 0) {
+            this._hass.callService("light", "turn_on", { entity_id: entity, brightness_pct: pct });
+          } else {
+            this._hass.callService("light", "turn_off", { entity_id: entity });
+          }
+        }
       };
 
-      track.addEventListener("pointermove", move);
-      track.addEventListener("pointerup", up);
-      track.addEventListener("pointercancel", up);
-    });
-
-    /* ---- ICON = MORE-INFO (group & individual) ---- */
-    icon.addEventListener("click", e => {
-      e.stopPropagation();
-      const ev = new Event("hass-more-info", { bubbles: true, composed: true });
-      ev.detail = { entityId: entity };
-      header.dispatchEvent(ev);
-    });
-
-    /* ---- CHEVRON = EXPAND / COLLAPSE (group only) ---- */
-    if (isGroup && chevron) {
-      chevron.addEventListener("click", e => {
+      track.addEventListener("click", e => {
         e.stopPropagation();
-        const grp = header.parentElement;
-        const expanded = grp.classList.toggle("expanded");
-        const individuals = grp.querySelector(".individuals");
-        individuals.classList.toggle("show", expanded);
-        chevron.classList.toggle("expanded", expanded);
-        if (expanded)
-          this._loadIndividuals(grp.dataset.entity, individuals);
+        set(e.clientX, true);
       });
-    }
+
+      track.addEventListener("pointerdown", e => {
+        e.stopPropagation();
+        this._dragging[entity] = true;
+        track.setPointerCapture(e.pointerId);
+
+        const move = ev => this._dragging[entity] && set(ev.clientX);
+        const up = () => {
+          if (!this._dragging[entity]) return;
+          this._dragging[entity] = false;
+          track.releasePointerCapture(e.pointerId);
+          set(e.clientX, true);
+          track.removeEventListener("pointermove", move);
+          track.removeEventListener("pointerup", up);
+          track.removeEventListener("pointercancel", up);
+        };
+
+        track.addEventListener("pointermove", move);
+        track.addEventListener("pointerup", up);
+        track.addEventListener("pointercancel", up);
+      });
+
+      // --- ICON = MORE INFO ---
+      icon.addEventListener("click", e => {
+        e.stopPropagation();
+        const ev = new Event("hass-more-info", { bubbles: true, composed: true });
+        ev.detail = { entityId: entity };
+        header.dispatchEvent(ev);
+      });
+
+      // --- CHEVRON = EXPAND ---
+      if (isGroup && chevron) {
+        chevron.addEventListener("click", e => {
+          e.stopPropagation();
+          const grp = header.parentElement;
+          const expanded = grp.classList.toggle("expanded");
+          const individuals = grp.querySelector(".individuals");
+          individuals.classList.toggle("show", expanded);
+          if (expanded) this._loadIndividuals(grp.dataset.entity, individuals);
+        });
+      }
+
+      // --- TAP ANYWHERE ELSE = TOGGLE ---
+      header.addEventListener("click", e => {
+        if (e.target.closest(".icon") || e.target.closest(".chevron") || e.target.closest(".lux")) return;
+        const st = this._hass.states[entity];
+        const turnOn = !st || st.state === "off";
+        this._hass.callService("light", turnOn ? "turn_on" : "turn_off", { entity_id: entity });
+      });
+    });
   }
 
-  /* -------------------------------------------------
-     INDIVIDUAL LIGHTS
-  ------------------------------------------------- */
   _loadIndividuals(groupId, container) {
     if (!this._hass) return;
     const grp = container.closest(".group");
@@ -260,17 +249,13 @@ class LightGroupCard extends HTMLElement {
       container.insertAdjacentHTML("beforeend", html);
     });
 
-    container.querySelectorAll(".header").forEach(h => this._attachHeader(h));
+    this._attachAll(); // Re-attach to new headers
   }
 
-  /* -------------------------------------------------
-     HASS UPDATE
-  ------------------------------------------------- */
   set hass(hass) {
     this._hass = hass;
-    this.shadowRoot.querySelectorAll(".item,.group > .header").forEach(el => {
-      const entity =
-        el.dataset.entity || el.closest(".group").dataset.entity;
+    this.shadowRoot.querySelectorAll(".item, .group > .header").forEach(el => {
+      const entity = el.dataset.entity || el.closest(".group").dataset.entity;
       if (!entity) return;
 
       const st = hass.states[entity];
@@ -283,9 +268,7 @@ class LightGroupCard extends HTMLElement {
 
       const key = `${on}|${bri}|${hex}`;
       if (this._lastStates[entity] !== key) {
-        const hdr = el.tagName === "DIV" && el.classList.contains("header")
-          ? el
-          : el.querySelector(".header");
+        const hdr = el.tagName === "DIV" && el.classList.contains("header") ? el : el.querySelector(".header");
 
         const dark = this._rgba(this._shade(hex, -40), 0.3);
         const start = this._rgba(hex, 0.7);
@@ -327,34 +310,22 @@ class LightGroupCard extends HTMLElement {
      HELPERS
   ------------------------------------------------- */
   _shade(hex, pct) {
-    let [r, g, b] = hex
-      .slice(1)
-      .match(/.{2}/g)
-      .map(v => parseInt(v, 16));
+    let [r, g, b] = hex.slice(1).match(/.{2}/g).map(v => parseInt(v, 16));
     r = Math.min(255, Math.round((r * (100 + pct)) / 100));
     g = Math.min(255, Math.round((g * (100 + pct)) / 100));
     b = Math.min(255, Math.round((b * (100 + pct)) / 100));
     return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
   }
-  _rgba(hex, a) {
-    const { r, g, b } = this._hexToRgb(hex);
-    return `rgba(${r},${g},${b},${a})`;
-  }
+  _rgba(hex, a) { const { r, g, b } = this._hexToRgb(hex); return `rgba(${r},${g},${b},${a})`; }
   _hexToRgb(h) {
     h = h.replace("#", "");
     if (h.length === 3) h = h.split("").map(c => c + c).join("");
-    return {
-      r: parseInt(h.substr(0, 2), 16),
-      g: parseInt(h.substr(2, 2), 16),
-      b: parseInt(h.substr(4, 2), 16)
-    };
+    return { r: parseInt(h.substr(0, 2), 16), g: parseInt(h.substr(2, 2), 16), b: parseInt(h.substr(4, 2), 16) };
   }
   _rgbToHex([r, g, b]) {
     return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
   }
 
-  getCardSize() {
-    return 3 + (this.config?.groups?.length || 0) * 3;
-  }
+  getCardSize() { return 3 + (this.config?.groups?.length || 0) * 3; }
 }
 customElements.define("light-group-card", LightGroupCard);
