@@ -135,7 +135,7 @@ class LightGroupCard extends HTMLElement {
       }
 
       // ---------- commitBrightness inside _attachHandlers ----------
-      const commitBrightness = (pct, commit) => {
+      const commitBrightness = (header,pct, commit) => {
         // update UI immediately
         header.style.setProperty("--pct", `${pct}%`);
         const fillEl = header.querySelector(".slider-fill");
@@ -173,7 +173,7 @@ class LightGroupCard extends HTMLElement {
           const rect = track.getBoundingClientRect();
           let pct = ((ev.clientX - rect.left) / rect.width) * 100;
           pct = Math.max(0, Math.min(100, Math.round(pct)));
-          commitBrightness(pct, false);
+          commitBrightness(header,pct, false);
           dragState.lastPct = pct;  // inside move()
           dragState.dragged = true; // mark as dragged
         };
@@ -188,9 +188,9 @@ class LightGroupCard extends HTMLElement {
       
           // Commit only if pct > 0
           if (dragState.lastPct > 0) {
-              commitBrightness(dragState.lastPct, true);
+              commitBrightness(header,dragState.lastPct, true);
           } else {
-              commitBrightness(0, false); // just update UI, don't call HA
+              commitBrightness(header,0, false); // just update UI, don't call HA
           }
       
           dragState.dragged = false;
