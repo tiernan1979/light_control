@@ -1,9 +1,9 @@
 /* -------------------------------------------------
    light-group-card.js
-   – slider colour = current light colour
-   – off → grey, on → full colour + glow
-   – expandable individual lights (auto + manual)
-   – optional lux sensor per room
+   – Header = Full Light Group Control (no power button)
+   – Slide, tap, % inside, color picker inside
+   – Dropdown shows individual lights
+   – Auto + manual lights supported
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
   constructor() {
@@ -23,47 +23,51 @@ class LightGroupCard extends HTMLElement {
           user-select: none;
         }
 
-        /* ---------- GROUP HEADER ---------- */
+        /* ---------- GROUP (HEADER = SLIDER) ---------- */
+        .group {
+          margin-bottom: 16px;
+        }
         .group-header {
           display: flex; align-items: center; gap: 8px;
-          padding: 8px 12px; cursor: pointer;
-          background: #222; border-radius: 6px; margin-bottom: 8px;
-          box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 2px rgba(255,255,255,0.1);
-        }
-        .group-header ha-icon { font-size: 24px; }
-        .group-header .name { flex: 1; font-weight: 500; }
-        .group-header .lux { font-size: 14px; color: #ccc; cursor: pointer; text-decoration: none; }
-        .group-header .arrow { transition: transform .2s; }
-        .group-header.expanded .arrow { transform: rotate(180deg); }
-
-        /* ---------- GROUP CONTROLS ---------- */
-        .group-controls { display: flex; align-items: center; gap: 12px; margin-bottom: 8px; }
-        .group-toggle { width: 40px; height: 40px; cursor: pointer; }
-        .group-toggle ha-icon { font-size: 28px; color: #ccc; }
-        .group-toggle.on ha-icon { color: var(--glow-color, #fff); }
-
-        .group-slider {
-          flex: 1; height: 34px; -webkit-appearance: none; appearance: none;
-          border-radius: 12px; outline: none; cursor: pointer;
+          height: 48px; padding: 0 12px;
+          border-radius: 12px; cursor: pointer;
           background: linear-gradient(to right,
             var(--gradient-dark) 0%,
             var(--gradient-start) var(--percent),
-            var(--light-gradient-end) var(--percent)
+            var(--light-gradient-end) var(--percent),
+            var(--light-gradient-end) 100%
           );
+          box-shadow: 0 2px 4px rgba(0,0,0,0.3), inset 0 1px 2px rgba(255,255,255,0.1);
+          position: relative;
+          overflow: hidden;
         }
-        .group-slider::-webkit-slider-thumb { -webkit-appearance:none; width:0; height:0; opacity:0; }
-        .group-slider::-moz-range-thumb { width:0; height:0; border:none; opacity:0; }
+        .group-header.off {
+          background: #333;
+        }
+        .group-header ha-icon.name-icon { font-size: 24px; }
+        .group-header .name { flex: 1; font-weight: 500; }
+        .group-header .lux { font-size: 14px; color: #ccc; cursor: pointer; }
+        .group-header .chevron { transition: transform .2s; font-size: 20px; }
+        .group-header.expanded .chevron { transform: rotate(90deg); }
 
-        .group-status { width: 50px; text-align: right; font-size: 15px; }
-
-        .group-color {
-          width: 40px; height: 40px; cursor: pointer;
-          border-radius: 50%; border: 2px solid #444;
-          background: #888;
+        .slider-track {
+          position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+          border-radius: 12px; cursor: pointer;
+        }
+        .percent-label {
+          position: absolute; right: 50px; top: 50%; transform: translateY(-50%);
+          font-size: 14px; font-weight: bold; color: white; pointer-events: none;
+        }
+        .color-dot {
+          position: absolute; right: 12px; top: 50%; transform: translateY(-50%);
+          width: 24px; height: 24px; border-radius: 50%; border: 2px solid #444;
+          cursor: pointer; background: #888;
         }
 
         /* ---------- INDIVIDUAL LIGHTS ---------- */
-        .individuals { margin-top: 8px; display: none; flex-direction: column; gap: 4px; }
+        .individuals {
+          margin-top: 8px; display: none; flex-direction: column; gap: 4px;
+        }
         .individuals.show { display: flex; }
         .ind-light {
           display: flex; align-items: center; gap: 8px; padding: 6px 10px;
@@ -107,20 +111,15 @@ class LightGroupCard extends HTMLElement {
       const manualLights = JSON.stringify(g.lights || []).replace(/"/g, '&quot;');
       html += `
         <div class="group" data-entity="${g.entity || ''}" data-manual-lights="${manualLights}">
-          <div class="group-header">
-            <ha-icon icon="${g.icon || 'mdi:lightbulb-group'}"></ha-icon>
+          <div class="group-header off">
+            <ha-icon class="name-icon" icon="${g.icon || 'mdi:lightbulb-group'}"></ha-icon>
             <span class="name">${g.name}</span>
             ${luxPart}
-            <ha-icon class="arrow" icon="mdi:chevron-down"></ha-icon>
+            <span class="percent-label">0%</span>
+            <div class="color-dot"></div>
+            <ha-icon class="chevron" icon="mdi:chevron-right"></ha-icon>
+            <div class="slider-track"></div>
           </div>
-
-          <div class="group-controls" style="--percent:0%">
-            <div class="group-toggle"><ha-icon icon="mdi:power"></ha-icon></div>
-            <input type="range" class="group-slider" min="0" max="100" step="5" value="0">
-            <span class="group-status">0%</span>
-            <div class="group-color"></div>
-          </div>
-
           <div class="individuals"></div>
         </div>`;
     });
@@ -132,88 +131,79 @@ class LightGroupCard extends HTMLElement {
      LISTENERS
   ------------------------------------------------- */
   _attachListeners() {
-    // ---- GROUP HEADER (expand + lux click) ----
-    this.shadowRoot.querySelectorAll('.group-header').forEach(h => {
-      h.addEventListener('click', e => {
-        if (e.target.classList.contains('lux')) {
-          const ev = new Event('hass-more-info', { bubbles:true, composed:true });
-          ev.detail = { entityId: e.target.dataset.entity };
-          e.target.dispatchEvent(ev);
-          return;
-        }
-        const group = h.parentElement;
-        const expanded = group.classList.toggle('expanded');
-        group.querySelector('.individuals').classList.toggle('show', expanded);
-        if (expanded) this._loadIndividuals(group.dataset.entity, group.querySelector('.individuals'));
+    this.shadowRoot.querySelectorAll('.group').forEach(group => {
+      const header = group.querySelector('.group-header');
+      const track = header.querySelector('.slider-track');
+      const entity = group.dataset.entity;
+      this._dragging[entity] = false;
+
+      // --- TAP = TOGGLE ---
+      header.addEventListener('click', e => {
+        if (e.target.closest('.lux') || e.target.closest('.color-dot')) return;
+        const state = this._hass.states[entity];
+        const turnOn = !state || state.state === 'off';
+        this._hass.callService('light', turnOn ? 'turn_on' : 'turn_off', { entity_id: entity });
       });
-    });
 
-    // ---- GROUP TOGGLE ----
-    this.shadowRoot.querySelectorAll('.group-toggle').forEach(t => {
-      t.addEventListener('click', () => {
-        const entity = t.closest('.group').dataset.entity;
-        const on = t.classList.toggle('on');
-        this._hass.callService('light', on ? 'turn_on' : 'turn_off', { entity_id: entity });
-      });
-    });
-
-    // ---- GROUP SLIDER (click / drag anywhere) ----
-    this.shadowRoot.querySelectorAll('.group-slider').forEach(s => {
-      const eid = s.closest('.group').dataset.entity;
-      this._dragging[eid] = false;
-
-      const setVal = v => {
-        s.value = v;
-        s.style.setProperty('--percent', v + '%');
-        s.closest('.group-controls').querySelector('.group-status').textContent = v + '%';
+      // --- SLIDER LOGIC ---
+      const setSlider = (pct, fromDrag = false) => {
+        header.style.setProperty('--percent', pct + '%');
+        header.querySelector('.percent-label').textContent = pct + '%';
+        header.classList.toggle('off', pct === 0);
+        if (pct > 0) this._hass.callService('light', 'turn_on', { entity_id: entity, brightness_pct: pct });
+        else this._hass.callService('light', 'turn_off', { entity_id: entity });
       };
 
-      s.addEventListener('click', e => {
+      track.addEventListener('click', e => {
         e.stopPropagation();
-        const rect = s.getBoundingClientRect();
+        const rect = track.getBoundingClientRect();
         const pct = Math.round((e.clientX - rect.left) / rect.width * 100 / 5) * 5;
-        setVal(pct);
-        this._hass.callService('light','turn_on',{entity_id:eid,brightness_pct:pct});
+        setSlider(pct);
       });
 
-      s.addEventListener('pointerdown', e => {
+      track.addEventListener('pointerdown', e => {
         e.stopPropagation();
-        this._dragging[eid] = true;
-        s.setPointerCapture(e.pointerId);
+        this._dragging[entity] = true;
+        track.setPointerCapture(e.pointerId);
         const move = ev => {
-          if (!this._dragging[eid]) return;
-          const rect = s.getBoundingClientRect();
+          if (!this._dragging[entity]) return;
+          const rect = track.getBoundingClientRect();
           const pct = Math.round((ev.clientX - rect.left) / rect.width * 100 / 5) * 5;
-          setVal(pct);
+          setSlider(pct, true);
         };
         const up = () => {
-          this._dragging[eid] = false;
-          s.releasePointerCapture(e.pointerId);
-          s.removeEventListener('pointermove', move);
-          s.removeEventListener('pointerup', up);
-          s.removeEventListener('pointercancel', up);
-          const v = +s.value;
-          this._hass.callService('light','turn_on',{entity_id:eid,brightness_pct:v});
+          this._dragging[entity] = false;
+          track.releasePointerCapture(e.pointerId);
+          track.removeEventListener('pointermove', move);
+          track.removeEventListener('pointerup', up);
+          track.removeEventListener('pointercancel', up);
         };
-        s.addEventListener('pointermove', move);
-        s.addEventListener('pointerup', up);
-        s.addEventListener('pointercancel', up);
+        track.addEventListener('pointermove', move);
+        track.addEventListener('pointerup', up);
+        track.addEventListener('pointercancel', up);
       });
-    });
 
-    // ---- GROUP COLOUR (open picker) ----
-    this.shadowRoot.querySelectorAll('.group-color').forEach(c => {
-      c.addEventListener('click', () => {
-        const entity = c.closest('.group').dataset.entity;
-        const ev = new Event('hass-more-info', { bubbles:true, composed:true });
+      // --- COLOR DOT ---
+      header.querySelector('.color-dot').addEventListener('click', e => {
+        e.stopPropagation();
+        const ev = new Event('hass-more-info', { bubbles: true, composed: true });
         ev.detail = { entityId: entity };
-        c.dispatchEvent(ev);
+        header.dispatchEvent(ev);
+      });
+
+      // --- EXPAND ---
+      header.addEventListener('dblclick', e => {
+        e.stopPropagation();
+        const expanded = group.classList.toggle('expanded');
+        group.querySelector('.individuals').classList.toggle('show', expanded);
+        header.querySelector('.chevron').classList.toggle('expanded', expanded);
+        if (expanded) this._loadIndividuals(entity, group.querySelector('.individuals'));
       });
     });
   }
 
   /* -------------------------------------------------
-     INDIVIDUAL LIGHTS – AUTO + MANUAL
+     INDIVIDUAL LIGHTS
   ------------------------------------------------- */
   _loadIndividuals(groupId, container) {
     if (!this._hass) return;
@@ -223,27 +213,15 @@ class LightGroupCard extends HTMLElement {
     const groupEntities = group?.attributes?.entity_id || [];
 
     const allLights = [];
-
-    // Add group lights
     groupEntities.forEach(id => {
       const st = this._hass.states[id];
       if (st) allLights.push({ entity: id, state: st });
     });
-
-    // Add manual lights
     manualLights.forEach(m => {
       const st = this._hass.states[m.entity];
-      if (st) {
-        allLights.push({
-          entity: m.entity,
-          state: st,
-          name: m.name,
-          icon: m.icon
-        });
-      }
+      if (st) allLights.push({ entity: m.entity, state: st, name: m.name, icon: m.icon });
     });
 
-    // Deduplicate
     const seen = new Set();
     const uniqueLights = allLights.filter(l => {
       if (seen.has(l.entity)) return false;
@@ -252,7 +230,6 @@ class LightGroupCard extends HTMLElement {
     });
 
     container.innerHTML = "";
-
     uniqueLights.forEach(l => {
       const st = l.state;
       const on = st.state === 'on';
@@ -278,7 +255,7 @@ class LightGroupCard extends HTMLElement {
       container.insertAdjacentHTML('beforeend', html);
     });
 
-    // Attach listeners
+    // Attach individual listeners
     container.querySelectorAll('.ind-toggle').forEach(t => {
       t.addEventListener('click', () => {
         const entity = t.closest('.ind-light').dataset.entity;
@@ -290,13 +267,11 @@ class LightGroupCard extends HTMLElement {
     container.querySelectorAll('.ind-slider').forEach(s => {
       const eid = s.closest('.ind-light').dataset.entity;
       this._dragging[eid] = false;
-
       const setVal = v => {
         s.value = v;
         s.style.setProperty('--ind-percent', v + '%');
         s.closest('.ind-light').querySelector('.ind-status').textContent = v + '%';
       };
-
       s.addEventListener('click', e => {
         e.stopPropagation();
         const rect = s.getBoundingClientRect();
@@ -304,7 +279,6 @@ class LightGroupCard extends HTMLElement {
         setVal(pct);
         this._hass.callService('light','turn_on',{entity_id:eid,brightness_pct:pct});
       });
-
       s.addEventListener('pointerdown', e => {
         e.stopPropagation();
         this._dragging[eid] = true;
@@ -332,49 +306,41 @@ class LightGroupCard extends HTMLElement {
   }
 
   /* -------------------------------------------------
-     HASS UPDATE – DYNAMIC COLOUR
+     HASS UPDATE
   ------------------------------------------------- */
   set hass(hass) {
     this._hass = hass;
-
     this.shadowRoot.querySelectorAll('.group').forEach(g => {
       const entity = g.dataset.entity;
-      const state = entity ? hass.states[entity] : null;
-      const on = state?.state === 'on';
-      const bri = on && state?.attributes.brightness ? Math.round(state.attributes.brightness/2.55) : 0;
-      const rgb = on && state?.attributes.rgb_color ? state.attributes.rgb_color : null;
+      if (!entity) return;
+      const state = hass.states[entity];
+      if (!state) return;
+
+      const on = state.state === 'on';
+      const bri = on && state.attributes.brightness ? Math.round(state.attributes.brightness/2.55) : 0;
+      const rgb = on && state.attributes.rgb_color ? state.attributes.rgb_color : null;
       const hex = rgb ? this._rgbToHex(rgb) : '#555';
       const key = `${on}|${bri}|${hex}`;
 
       if (this._lastStates[entity] !== key) {
-        // toggle
-        g.querySelector('.group-toggle').classList.toggle('on', on);
-
-        // slider colour
+        const header = g.querySelector('.group-header');
         const dark = this._rgba(this._shade(hex,-40),0.3);
         const start = this._rgba(hex,0.7);
         const light = this._rgba(this._shade(hex,50),0.1);
-        const ctrl = g.querySelector('.group-controls');
-        ctrl.style.setProperty('--gradient-dark', dark);
-        ctrl.style.setProperty('--gradient-start', start);
-        ctrl.style.setProperty('--light-gradient-end', light);
 
-        // glow
+        header.style.setProperty('--gradient-dark', dark);
+        header.style.setProperty('--gradient-start', start);
+        header.style.setProperty('--light-gradient-end', light);
+        header.style.setProperty('--percent', bri + '%');
+        header.querySelector('.percent-label').textContent = bri + '%';
+        header.querySelector('.color-dot').style.background = hex;
+        header.classList.toggle('off', bri === 0);
         this.shadowRoot.host.style.setProperty('--glow-color', on ? hex : '#ccc');
-
-        // slider value
-        const slider = g.querySelector('.group-slider');
-        slider.value = bri;
-        slider.style.setProperty('--percent', bri + '%');
-        g.querySelector('.group-status').textContent = bri + '%';
-
-        // colour circle
-        g.querySelector('.group-color').style.background = hex;
 
         this._lastStates[entity] = key;
       }
 
-      // lux sensor
+      // Lux
       const luxEl = g.querySelector('.lux');
       if (luxEl) {
         const s = hass.states[luxEl.dataset.entity];
@@ -382,7 +348,6 @@ class LightGroupCard extends HTMLElement {
         luxEl.textContent = val !== null ? `${val} lx` : '-- lx';
       }
 
-      // update expanded individuals
       if (g.classList.contains('expanded')) {
         this._loadIndividuals(entity, g.querySelector('.individuals'));
       }
@@ -402,6 +367,6 @@ class LightGroupCard extends HTMLElement {
   _hexToRgb(h) { h = h.replace('#',''); if (h.length===3) h=h.split('').map(c=>c+c).join(''); return {r:parseInt(h.substr(0,2),16),g:parseInt(h.substr(2,2),16),b:parseInt(h.substr(4,2),16)}; }
   _rgbToHex([r,g,b]) { return `#${r.toString(16).padStart(2,'0')}${g.toString(16).padStart(2,'0')}${b.toString(16).padStart(2,'0')}`; }
 
-  getCardSize() { return 4 + (this.config?.groups?.length || 0) * 2; }
+  getCardSize() { return 3 + (this.config?.groups?.length || 0) * 2; }
 }
 customElements.define('light-group-card', LightGroupCard);
