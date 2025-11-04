@@ -276,7 +276,8 @@ class LightGroupCard extends HTMLElement {
     const rgbMatch = cardBg.match(/(\d+),\s*(\d+),\s*(\d+)/);
     const cardRgb = rgbMatch ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])] : [28,28,28];
     const offBg = `rgb(${Math.min(255, cardRgb[0] + 13)}, ${Math.min(255, cardRgb[1] + 13)}, ${Math.min(255, cardRgb[2] + 13)})`;
-
+    this._defaultRgb = offBg;
+     
     // ---------- inside set hass(hass) ----------
     this.shadowRoot.querySelectorAll(".header").forEach(hdr => {
       const entity = hdr.closest(".group")?.dataset.entity || hdr.closest(".item")?.dataset.entity;
