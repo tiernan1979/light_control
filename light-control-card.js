@@ -1,9 +1,9 @@
 /* -------------------------------------------------
    light-group-card.js
    – Full bar coloured
-   – Icon opens colour picker
-   – Chevron expands group (mobile)
-   – 1 % brightness steps
+   – Icon opens colour picker (group + individuals)
+   – Chevron-down expands group (mobile-friendly)
+   – Drag = brightness (1%), off only at 0%
    – bar_height configurable
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
@@ -55,12 +55,12 @@ class LightGroupCard extends HTMLElement {
           box-shadow:0 2px 4px rgba(0,0,0,.3),inset 0 1px 2px rgba(255,255,255,.1);
         }
         .header.off{background:#333;}
-        .header ha-icon.icon{font-size:24px;}
+        .header ha-icon.icon{font-size:24px;cursor:pointer;}
         .header .name{flex:1;font-weight:500;}
         .header .lux{font-size:14px;color:#ccc;cursor:pointer;}
         .header .percent{
           position:absolute;
-          right:32px;
+          right:48px; /* moved further from chevron */
           top:50%;
           transform:translateY(-50%);
           font-size:14px;
@@ -69,9 +69,12 @@ class LightGroupCard extends HTMLElement {
         }
         .header .chevron{
           transition:transform .2s;
-          font-size:20px;
+          font-size:22px;
+          cursor:pointer;
+          padding:4px; /* larger tap area */
         }
-        .header.expanded .chevron{transform:rotate(90deg);}
+        .header .chevron:active{opacity:0.7;}
+        .header.expanded .chevron{transform:rotate(180deg);}
         .header.dark-text{color:#000;}
         .slider-track{
           position:absolute;
@@ -103,7 +106,7 @@ class LightGroupCard extends HTMLElement {
             <span class="name">${g.name}</span>
             ${lux}
             <span class="percent">0%</span>
-            <ha-icon class="chevron" icon="mdi:chevron-right"></ha-icon>
+            <ha-icon class="chevron" icon="mdi:chevron-down"></ha-icon>
             <div class="slider-track"></div>
           </div>
           <div class="individuals"></div>
@@ -135,14 +138,13 @@ class LightGroupCard extends HTMLElement {
 
     this._dragging[entity] = false;
 
-    /* ---- TAP = TOGGLE (anywhere except lux/icon/chevron) ---- */
+    /* ---- TAP = TOGGLE (only if not on icon, chevron, or lux) ---- */
     header.addEventListener("click", e => {
       if (
-        e.target.closest(".lux") ||
         e.target.closest(".icon") ||
-        e.target.closest(".chevron")
-      )
-        return;
+        e.target.closest(".chevron") ||
+        e.target.closest(".lux")
+      ) return;
 
       const st = this._hass.states[entity];
       const turnOn = !st || st.state === "off";
@@ -153,7 +155,7 @@ class LightGroupCard extends HTMLElement {
       );
     });
 
-    /* ---- SMOOTH DRAG (1 % steps) ---- */
+    /* ---- SMOOTH DRAG (1% steps, off only at 0) ---- */
     const set = (clientX, commit = false) => {
       const r = track.getBoundingClientRect();
       const off = clientX - r.left;
@@ -192,7 +194,7 @@ class LightGroupCard extends HTMLElement {
       track.addEventListener("pointercancel", up);
     });
 
-    /* ---- ICON = MORE-INFO (colour picker, etc.) ---- */
+    /* ---- ICON = MORE-INFO (group & individual) ---- */
     icon.addEventListener("click", e => {
       e.stopPropagation();
       const ev = new Event("hass-more-info", { bubbles: true, composed: true });
@@ -201,15 +203,16 @@ class LightGroupCard extends HTMLElement {
     });
 
     /* ---- CHEVRON = EXPAND / COLLAPSE (group only) ---- */
-    if (isGroup) {
+    if (isGroup && chevron) {
       chevron.addEventListener("click", e => {
         e.stopPropagation();
         const grp = header.parentElement;
         const expanded = grp.classList.toggle("expanded");
-        grp.querySelector(".individuals").classList.toggle("show", expanded);
+        const individuals = grp.querySelector(".individuals");
+        individuals.classList.toggle("show", expanded);
         chevron.classList.toggle("expanded", expanded);
         if (expanded)
-          this._loadIndividuals(grp.dataset.entity, grp.querySelector(".individuals"));
+          this._loadIndividuals(grp.dataset.entity, individuals);
       });
     }
   }
@@ -295,7 +298,6 @@ class LightGroupCard extends HTMLElement {
         hdr.querySelector(".percent").textContent = bri + "%";
         hdr.classList.toggle("off", bri === 0);
 
-        // readable text on bright colours
         if (on) {
           const { r, g, b } = this._hexToRgb(hex);
           const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
@@ -307,7 +309,6 @@ class LightGroupCard extends HTMLElement {
         this._lastStates[entity] = key;
       }
 
-      // lux sensor
       const lux = el.querySelector(".lux");
       if (lux) {
         const s = hass.states[lux.dataset.entity];
@@ -315,7 +316,6 @@ class LightGroupCard extends HTMLElement {
         lux.textContent = v !== null ? `${v} lx` : "-- lx";
       }
 
-      // reload individuals if expanded
       const grp = el.closest(".group");
       if (grp && grp.classList.contains("expanded")) {
         this._loadIndividuals(grp.dataset.entity, grp.querySelector(".individuals"));
@@ -334,9 +334,7 @@ class LightGroupCard extends HTMLElement {
     r = Math.min(255, Math.round((r * (100 + pct)) / 100));
     g = Math.min(255, Math.round((g * (100 + pct)) / 100));
     b = Math.min(255, Math.round((b * (100 + pct)) / 100));
-    return `#${r.toString(16).padStart(2, "0")}${g
-      .toString(16)
-      .padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+    return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
   }
   _rgba(hex, a) {
     const { r, g, b } = this._hexToRgb(hex);
@@ -352,9 +350,7 @@ class LightGroupCard extends HTMLElement {
     };
   }
   _rgbToHex([r, g, b]) {
-    return `#${r.toString(16).padStart(2, "0")}${g
-      .toString(16)
-      .padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+    return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
   }
 
   getCardSize() {
