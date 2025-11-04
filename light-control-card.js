@@ -83,6 +83,27 @@ class LightGroupCard extends HTMLElement {
     container.innerHTML = html;
   }
 
+   // set initial slider fill for individuals
+   container.querySelectorAll(".header").forEach(hdr => {
+     const entityId = hdr.closest(".item")?.dataset.entity;
+     const st = this._hass.states[entityId];
+     if (!st) return;
+     const on = st.state === "on";
+     const bri = on && st.attributes.brightness
+       ? Math.round(st.attributes.brightness / 2.55)
+       : 0;
+     const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : this._defaultRgb;
+     const rgba = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${on?0.4:0.25})`;
+   
+     hdr.style.setProperty("--pct", `${bri}%`);
+     hdr.style.setProperty("--fill", rgba);
+     hdr.querySelector(".slider-fill").style.background = rgba;
+     hdr.querySelector(".percent").textContent = `${bri}%`;
+   
+     if (!this._dragging[entityId]) this._dragging[entityId] = { active: false, lastPct: bri, lastRgb: rgb };
+     else this._dragging[entityId].lastRgb = rgb;
+   });   
+   
   /* ------------------------------------------------- */
   _attachHandlers() {
     // re-attach every time we rebuild the DOM (initial + individuals)
@@ -175,20 +196,28 @@ class LightGroupCard extends HTMLElement {
 
       // header click → group = always turn ON, single = toggle
       header.addEventListener("click", e => {
-          if (e.target.closest(".icon,.chevron,.lux")) return;
-          const state = entity ? this._hass.states[entity] : null;
-          const isGroup = state?.attributes?.entity_id?.length > 1;
+        if (e.target.closest(".icon,.chevron,.lux")) return;
       
-          if (isGroup) {
-            // GROUP: always turn ON (no toggle)
-            this._hass.callService("light", "turn_on", { entity_id: entity });
-          } else {
-            // SINGLE: only turn OFF on click
-            if (state?.state === "on") {
-              this._hass.callService("light", "turn_off", { entity_id: entity });
-            }
-            // do nothing if it's already OFF
-          }
+        const item = header.closest(".item");       // individual light
+        const groupEl = header.closest(".group");   // group element
+        const groupEntity = groupEl?.dataset.entity;
+      
+        if (item) {
+          // individual → toggle this light
+          const targetEntity = item.dataset.entity;
+          const state = this._hass.states[targetEntity];
+          const turnOn = !state || state.state === "off";
+          this._hass.callService("light", turnOn ? "turn_on" : "turn_off", { entity_id: targetEntity });
+        } else if (groupEntity) {
+          // group → toggle all members
+          const state = this._hass.states[groupEntity];
+          const ids = state?.attributes?.entity_id || [];
+          const anyOn = ids.some(id => this._hass.states[id]?.state === "on");
+      
+          ids.forEach(id => {
+            this._hass.callService("light", anyOn ? "turn_off" : "turn_on", { entity_id: id });
+          });
+        }
       });
     });
   }
@@ -261,45 +290,37 @@ class LightGroupCard extends HTMLElement {
 
       const isGroup = st.attributes?.entity_id?.length > 1;
       const on = st.state === "on";
-      const bri = on && st.attributes.brightness
-        ? Math.round(st.attributes.brightness / 2.55)
-        : 0;
-
-      // colour handling
+      const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness / 2.55) : 0;
+      
+      // use the light's own color or default
       const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : this._defaultRgb;
       const rgba = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${on?0.4:0.25})`;
-      const hsl = this._rgbToHsl(...rgb);
-      const iconHsl = `hsl(${hsl.h},${hsl.s}%,${Math.min(100,hsl.l+60)}%)`;
-
-      const key = `${entity}|${on}|${bri}|${rgb}`;
-      if (this._lastStates[entity] === key) return;
-      this._lastStates[entity] = key;
-
-      // background
-      hdr.style.setProperty("--off-bg", offBg);
-      hdr.style.background = on ? "none" : offBg;
-
-      // fill + percent
       hdr.style.setProperty("--pct", `${bri}%`);
       hdr.style.setProperty("--fill", rgba);
       hdr.querySelector(".slider-fill").style.background = rgba;
       hdr.querySelector(".percent").textContent = `${bri}%`;
-
-      // icon
+      
+      // icon color
+      const hsl = this._rgbToHsl(...rgb);
+      const iconHsl = `hsl(${hsl.h},${hsl.s}%,${Math.min(100,hsl.l+60)}%)`;
       const icon = hdr.querySelector(".icon");
       icon.style.color = iconHsl;
       icon.setAttribute("icon", isGroup ? "mdi:lightbulb-group" : "mdi:lightbulb");
-
-      // chevron (only groups)
+      
+      // chevron only for groups
       const chev = hdr.querySelector(".chevron");
       if (chev) {
         chev.style.display = isGroup ? "block" : "none";
         const expanded = hdr.closest(".group")?.classList.contains("expanded");
         chev.setAttribute("icon", expanded ? "mdi:chevron-down" : "mdi:chevron-right");
       }
-
+      
       // remember colour for dragging
       if (this._dragging[entity]) this._dragging[entity].lastRgb = rgb;
+      
+      // update _lastStates AFTER first render to allow new individuals to render properly
+      const key = `${entity}|${on}|${bri}|${rgb}`;
+      this._lastStates[entity] = key;
     });
 
     // ---- lux sensors ----
