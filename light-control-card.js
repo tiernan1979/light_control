@@ -14,7 +14,6 @@ class LightGroupCard extends HTMLElement {
        const st = this._hass.states[entity];
        if (!st) return;
        const dragState = this._dragging[entity];
-       const dragState = this._dragging[entity];
        if (dragState?.active) {
            // Use the dragging value instead of HA state
            const pct = dragState.lastPct ?? 0;
