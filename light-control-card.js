@@ -187,17 +187,19 @@ class LightGroupCard extends HTMLElement {
           this._dragging[entity].lastPct = pct;
           this._dragging[entity].lastRgb = rgb;
       
-          // FIX: only turn_off at 0%, otherwise always turn_on with exact brightness
-          if (pct > 0) {
+          // ✅ FIX: only turn_off when at absolute 0%
+          // otherwise always turn_on with exact brightness
+          if (pct <= 0) {
+            this._hass.callService("light", "turn_off", { entity_id: entity });
+          } else {
             this._hass.callService("light", "turn_on", {
               entity_id: entity,
               brightness_pct: pct
             });
-          } else {
-            this._hass.callService("light", "turn_off", { entity_id: entity });
           }
         }
       };
+
 
 
       track.addEventListener("pointerdown", e => {
@@ -205,14 +207,16 @@ class LightGroupCard extends HTMLElement {
         e.stopPropagation();
         this._dragging[entity].active = true;
         track.setPointerCapture(e.pointerId);
-        updateBrightness(e.clientX); // preview only, don’t commit yet
+      
+        // ✅ Don’t commit on first touch; just preview position
+        updateBrightness(e.clientX);
       
         const move = ev => this._dragging[entity].active && updateBrightness(ev.clientX);
         const up = ev => {
           if (!this._dragging[entity].active) return;
           this._dragging[entity].active = false;
           track.releasePointerCapture(e.pointerId);
-          updateBrightness(ev.clientX, true); // commit final brightness
+          updateBrightness(ev.clientX, true); // ✅ commit final brightness
           track.removeEventListener("pointermove", move);
           track.removeEventListener("pointerup", up);
           track.removeEventListener("pointercancel", up);
@@ -222,6 +226,7 @@ class LightGroupCard extends HTMLElement {
         track.addEventListener("pointerup", up);
         track.addEventListener("pointercancel", up);
       });
+
 
       icon.addEventListener("click", e => {
         e.stopPropagation();
@@ -309,13 +314,22 @@ class LightGroupCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
 
-    const cardBg = getComputedStyle(this).backgroundColor || "rgb(28,28,28)";
-    const rgbMatch = cardBg.match(/(\d+),\s*(\d+),\s*(\d+)/);
-    const cardRgb = rgbMatch ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])] : [28,28,28];
+    const cardBgRaw = getComputedStyle(document.documentElement)
+      .getPropertyValue("--ha-card-background")
+      || getComputedStyle(document.documentElement)
+      .getPropertyValue("--card-background-color")
+      || "rgb(28,28,28)";
+      
+    const rgbMatch = cardBgRaw.match(/(\d+),\s*(\d+),\s*(\d+)/);
+    const cardRgb = rgbMatch
+      ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])]
+      : [28, 28, 28];
+      
+    // ✅ Slightly lighter (5%) than card color
     const offBg = `rgb(
-       ${Math.min(255, Math.round(cardRgb[0] * 1.05))},
-       ${Math.min(255, Math.round(cardRgb[1] * 1.05))},
-       ${Math.min(255, Math.round(cardRgb[2] * 1.05))}
+      ${Math.min(255, Math.round(cardRgb[0] * 1.05))},
+      ${Math.min(255, Math.round(cardRgb[1] * 1.05))},
+      ${Math.min(255, Math.round(cardRgb[2] * 1.05))}
     )`;
 
     this.shadowRoot.querySelectorAll(".item, .group > .header").forEach(el => {
