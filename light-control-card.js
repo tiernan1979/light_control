@@ -287,12 +287,16 @@ class LightGroupCard extends HTMLElement {
       const st = hass.states[entity];
       if (!st) return;
 
-      const isGroup = st.attributes?.entity_id?.length > 1;
+      const attrs = st.attributes || {};
+      const entityIds = Array.isArray(attrs.entity_id) ? attrs.entity_id : [];
+      const isGroup = entityIds.length > 1;
       const on = st.state === "on";
-      const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness / 2.55) : 0;
-      
-      // use the light's own color or default
-      const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : this._defaultRgb;
+      const bri = on && typeof attrs.brightness === "number"
+          ? Math.round(attrs.brightness / 2.55)
+          : 0;
+      const rgb = on && Array.isArray(attrs.rgb_color) ? attrs.rgb_color : this._defaultRgb;
+
+
       const rgba = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${on?0.4:0.25})`;
       hdr.style.setProperty("--pct", `${bri}%`);
       hdr.style.setProperty("--fill", rgba);
