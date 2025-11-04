@@ -1,12 +1,11 @@
 /* -------------------------------------------------
    light-group-card.js
-   – ON at load: correct color + fill
-   – Sliding: live visual + smooth
+   – Fixed: t is not defined
+   – OFF: +5% brighter than card
+   – Sliding: live feedback
    – Individuals: own rgb_color
    – No refresh loop
-   – OFF: +15% lighter
-   – Text: white
-   – Config: padding
+   – padding: YAML config
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
   constructor() {
@@ -112,7 +111,7 @@ class LightGroupCard extends HTMLElement {
 
     config.groups.forEach(g => {
       const lux = g.lux_sensor
-       t ? `<span class="lux" data-entity="${g.lux_sensor}">-- lx</span>`
+        ? `<span class="lux" data-entity="${g.lux_sensor}">-- lx</span>`
         : "";
       const manual = JSON.stringify(g.lights || []).replace(/"/g, "&quot;");
       html += `
@@ -166,11 +165,10 @@ class LightGroupCard extends HTMLElement {
         const width = rect.width;
         const pct = Math.max(0, Math.min(100, Math.round((offsetX / width) * 100)));
 
-        // LIVE UI UPDATE
+        // LIVE UPDATE
         header.style.setProperty("--percent", pct + "%");
         percentEl.textContent = pct + "%";
 
-        // Commit only on release
         if (commit && this._dragging[entity].lastPct !== pct) {
           if (pct > 0) {
             this._hass.callService("light", "turn_on", { entity_id: entity, brightness_pct: pct });
@@ -282,7 +280,7 @@ class LightGroupCard extends HTMLElement {
     const cardBg = getComputedStyle(this).backgroundColor || "rgb(28,28,28)";
     const rgbMatch = cardBg.match(/(\d+),\s*(\d+),\s*(\d+)/);
     const cardRgb = rgbMatch ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])] : [28,28,28];
-    const offBg = `rgb(${Math.min(255, cardRgb[0] + 38)}, ${Math.min(255, cardRgb[1] + 38)}, ${Math.min(255, cardRgb[2] + 38)})`;
+    const offBg = `rgb(${Math.min(255, cardRgb[0] + 13)}, ${Math.min(255, cardRgb[1] + 13)}, ${Math.min(255, cardRgb[2] + 13)})`;
 
     this.shadowRoot.querySelectorAll(".item, .group > .header").forEach(el => {
       const entity = el.dataset.entity || el.closest(".group").dataset.entity;
@@ -303,7 +301,7 @@ class LightGroupCard extends HTMLElement {
         const percentEl = hdr.querySelector(".percent");
         const icon = hdr.querySelector(".icon");
 
-        // OFF: lighter background
+        // OFF: +5% brighter
         hdr.style.setProperty("--off-bg", offBg);
         if (!on) {
           hdr.style.background = offBg;
