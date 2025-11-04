@@ -1,7 +1,7 @@
 /* -------------------------------------------------
    light-group-card.js
    – Solid colour fill (group + individuals)
-   – % label: white under color, black on top
+   – % label: white under color, black on top (readable at 78%)
    – Dragging works (hold + move)
    – Chevron: > (collapsed) / down arrow (expanded)
    – Single click = toggle
@@ -48,7 +48,6 @@ class LightGroupCard extends HTMLElement {
         }
         .header.off { background: #333; }
 
-        /* ICON & CHEVRON – always on top */
         .header ha-icon.icon,
         .header ha-icon.chevron {
           font-size: 24px;
@@ -67,7 +66,6 @@ class LightGroupCard extends HTMLElement {
         .header .name { flex: 1; font-weight: 500; z-index: 3; position: relative; }
         .header .lux { font-size: 14px; color: #ccc; cursor: pointer; z-index: 3; position: relative; }
 
-        /* % LABEL – dynamic color */
         .header .percent {
           position: absolute;
           right: 56px;
@@ -80,7 +78,6 @@ class LightGroupCard extends HTMLElement {
           transition: color 0.1s ease;
         }
 
-        /* SOLID FILL */
         .slider-fill {
           position: absolute;
           left: 0; top: 0; height: 100%;
@@ -157,20 +154,22 @@ class LightGroupCard extends HTMLElement {
 
       this._dragging[entity] = false;
 
-      // --- DRAG & CLICK (fixed) ---
+      // --- DRAG & CLICK (FIXED: no redeclaration of r) ---
       const set = (clientX, commit = false) => {
-        const r = track.getBoundingClientRect();
-        const off = clientX - r.left;
-        const pct = Math.max(0, Math.min(100, Math.round((off / r.width) * 100)));
+        const rHeader = track.getBoundingClientRect();  // renamed to avoid conflict
+        const off = clientX - rHeader.left;
+        const pct = Math.max(0, Math.min(100, Math.round((off / rHeader.width) * 100)));
         header.style.setProperty("--percent", pct + "%");
         percentEl.textContent = pct + "%";
         header.classList.toggle("off", pct === 0);
 
-        // Update % color based on position
-        const percentX = percentEl.getBoundingClientRect().left - r.left + (percentEl.offsetWidth / 2);
-        const underFill = percentX <= (r.width * pct / 100);
-        const { r, g, b } = this._hexToRgb(header.style.getPropertyValue("--light-color") || "#555");
-        const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        // Dynamic % color: white under fill, black on bright fill
+        const lightColor = header.style.getPropertyValue("--light-color") || "#555";
+        const { r: lightR, g: lightG, b: lightB } = this._hexToRgb(lightColor);
+        const lum = (0.299 * lightR + 0.587 * lightG + 0.114 * lightB) / 255;
+
+        const percentX = percentEl.getBoundingClientRect().left - rHeader.left + (percentEl.offsetWidth / 2);
+        const underFill = percentX <= (rHeader.width * pct / 100);
         percentEl.style.color = underFill ? (lum > 0.5 ? "#000" : "#fff") : "#fff";
 
         if (commit) {
@@ -183,7 +182,7 @@ class LightGroupCard extends HTMLElement {
       };
 
       track.addEventListener("pointerdown", e => {
-        e.preventDefault(); // Prevent text selection
+        e.preventDefault();
         this._dragging[entity] = true;
         track.setPointerCapture(e.pointerId);
         set(e.clientX);
@@ -305,14 +304,14 @@ class LightGroupCard extends HTMLElement {
         percentEl.textContent = bri + "%";
         hdr.classList.toggle("off", bri === 0);
 
-        // Dynamic text color for name/icon/lux
+        // Dynamic text color
         const { r, g, b } = this._hexToRgb(hex);
         const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
         const textColor = lum > 0.55 ? "#000" : "#fff";
         hdr.style.color = textColor;
         hdr.querySelectorAll("ha-icon, .name, .lux").forEach(e => e.style.color = textColor);
 
-        // % label: white if under fill, black if on bright fill
+        // % label: white if under fill
         const rHeader = hdr.getBoundingClientRect();
         const percentX = percentEl.getBoundingClientRect().left - rHeader.left + (percentEl.offsetWidth / 2);
         const underFill = percentX <= (rHeader.width * bri / 100);
