@@ -1,10 +1,10 @@
 /* -------------------------------------------------
    light-group-card.js
    – Solid colour fill (group + individuals)
-   – Dynamic text/ icon colour (readable at 50%)
+   – % label: white under color, black on top
+   – Dragging works (hold + move)
    – Chevron: > (collapsed) / down arrow (expanded)
    – Single click = toggle
-   – Drag = brightness (1 %), off only at 0 %
    – Icon = more-info | Chevron = expand
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
@@ -53,7 +53,7 @@ class LightGroupCard extends HTMLElement {
         .header ha-icon.chevron {
           font-size: 24px;
           cursor: pointer;
-          z-index: 2;
+          z-index: 3;
           pointer-events: auto;
           position: relative;
         }
@@ -64,8 +64,10 @@ class LightGroupCard extends HTMLElement {
         }
         .header .chevron:active { opacity: 0.7; }
 
-        .header .name { flex: 1; font-weight: 500; z-index: 2; position: relative; }
-        .header .lux { font-size: 14px; color: #ccc; cursor: pointer; z-index: 2; position: relative; }
+        .header .name { flex: 1; font-weight: 500; z-index: 3; position: relative; }
+        .header .lux { font-size: 14px; color: #ccc; cursor: pointer; z-index: 3; position: relative; }
+
+        /* % LABEL – dynamic color */
         .header .percent {
           position: absolute;
           right: 56px;
@@ -75,6 +77,7 @@ class LightGroupCard extends HTMLElement {
           font-weight: bold;
           pointer-events: none;
           z-index: 2;
+          transition: color 0.1s ease;
         }
 
         /* SOLID FILL */
@@ -92,7 +95,7 @@ class LightGroupCard extends HTMLElement {
           inset: 0;
           border-radius: 12px;
           cursor: pointer;
-          z-index: 1;
+          z-index: 2;
         }
 
         .individuals { margin-top: 8px; display: none; }
@@ -137,6 +140,7 @@ class LightGroupCard extends HTMLElement {
       let fill = header.querySelector(".slider-fill");
       let icon = header.querySelector(".icon");
       let chevron = header.querySelector(".chevron");
+      let percentEl = header.querySelector(".percent");
       const isGroup = header.dataset.type === "group";
 
       // Clone & re-attach
@@ -148,18 +152,27 @@ class LightGroupCard extends HTMLElement {
         if (el === fill) fill = clone;
         if (el === icon) icon = clone;
         if (el === chevron) chevron = clone;
+        if (el === percentEl) percentEl = clone;
       });
 
       this._dragging[entity] = false;
 
-      // --- DRAG & CLICK ---
+      // --- DRAG & CLICK (fixed) ---
       const set = (clientX, commit = false) => {
         const r = track.getBoundingClientRect();
         const off = clientX - r.left;
         const pct = Math.max(0, Math.min(100, Math.round((off / r.width) * 100)));
         header.style.setProperty("--percent", pct + "%");
-        header.querySelector(".percent").textContent = pct + "%";
+        percentEl.textContent = pct + "%";
         header.classList.toggle("off", pct === 0);
+
+        // Update % color based on position
+        const percentX = percentEl.getBoundingClientRect().left - r.left + (percentEl.offsetWidth / 2);
+        const underFill = percentX <= (r.width * pct / 100);
+        const { r, g, b } = this._hexToRgb(header.style.getPropertyValue("--light-color") || "#555");
+        const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+        percentEl.style.color = underFill ? (lum > 0.5 ? "#000" : "#fff") : "#fff";
+
         if (commit) {
           if (pct > 0) {
             this._hass.callService("light", "turn_on", { entity_id: entity, brightness_pct: pct });
@@ -169,11 +182,12 @@ class LightGroupCard extends HTMLElement {
         }
       };
 
-      track.addEventListener("click", e => { e.stopPropagation(); set(e.clientX, true); });
       track.addEventListener("pointerdown", e => {
-        e.stopPropagation();
+        e.preventDefault(); // Prevent text selection
         this._dragging[entity] = true;
         track.setPointerCapture(e.pointerId);
+        set(e.clientX);
+
         const move = ev => this._dragging[entity] && set(ev.clientX);
         const up = () => {
           if (!this._dragging[entity]) return;
@@ -184,6 +198,7 @@ class LightGroupCard extends HTMLElement {
           track.removeEventListener("pointerup", up);
           track.removeEventListener("pointercancel", up);
         };
+
         track.addEventListener("pointermove", move);
         track.addEventListener("pointerup", up);
         track.addEventListener("pointercancel", up);
@@ -279,6 +294,7 @@ class LightGroupCard extends HTMLElement {
       if (this._lastStates[entity] !== key) {
         const hdr = el.tagName === "DIV" && el.classList.contains("header") ? el : el.querySelector(".header");
         const fill = hdr.querySelector(".slider-fill");
+        const percentEl = hdr.querySelector(".percent");
 
         // Solid fill color
         hdr.style.setProperty("--light-color", hex);
@@ -286,19 +302,23 @@ class LightGroupCard extends HTMLElement {
 
         // Update percent
         hdr.style.setProperty("--percent", bri + "%");
-        hdr.querySelector(".percent").textContent = bri + "%";
+        percentEl.textContent = bri + "%";
         hdr.classList.toggle("off", bri === 0);
 
-        // Dynamic text color – readable at 50%
+        // Dynamic text color for name/icon/lux
         const { r, g, b } = this._hexToRgb(hex);
         const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-        const textColor = lum > 0.55 ? "#000" : "#fff";  // Slightly higher threshold
+        const textColor = lum > 0.55 ? "#000" : "#fff";
         hdr.style.color = textColor;
-        hdr.querySelectorAll("ha-icon, .name, .lux, .percent").forEach(e => {
-          e.style.color = textColor;
-        });
+        hdr.querySelectorAll("ha-icon, .name, .lux").forEach(e => e.style.color = textColor);
 
-        // Update chevron icon
+        // % label: white if under fill, black if on bright fill
+        const rHeader = hdr.getBoundingClientRect();
+        const percentX = percentEl.getBoundingClientRect().left - rHeader.left + (percentEl.offsetWidth / 2);
+        const underFill = percentX <= (rHeader.width * bri / 100);
+        percentEl.style.color = underFill ? (lum > 0.5 ? "#000" : "#fff") : "#fff";
+
+        // Update chevron
         const chevron = hdr.querySelector(".chevron");
         if (chevron) {
           const isExpanded = hdr.closest(".group")?.classList.contains("expanded");
