@@ -170,23 +170,24 @@ class LightGroupCard extends HTMLElement {
         const offsetX = clientX - rect.left;
         const width = rect.width;
         const pct = Math.max(0, Math.min(100, Math.round((offsetX / width) * 100)));
-
+      
         header.style.setProperty("--percent", pct + "%");
         percentEl.textContent = pct + "%";
-
+      
         const st = this._hass.states[entity];
         const rgb = (st && st.attributes && st.attributes.rgb_color)
           ? st.attributes.rgb_color
           : this._dragging[entity].lastRgb;
-
+      
         const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.4)`;
         header.style.setProperty("--light-fill", fillRgba);
         fill.style.background = fillRgba;
-
+      
         if (commit) {
           this._dragging[entity].lastPct = pct;
           this._dragging[entity].lastRgb = rgb;
-
+      
+          // FIX: only turn_off at 0%, otherwise always turn_on with exact brightness
           if (pct > 0) {
             this._hass.callService("light", "turn_on", {
               entity_id: entity,
@@ -198,23 +199,25 @@ class LightGroupCard extends HTMLElement {
         }
       };
 
+
       track.addEventListener("pointerdown", e => {
         e.preventDefault();
+        e.stopPropagation();
         this._dragging[entity].active = true;
         track.setPointerCapture(e.pointerId);
-        updateBrightness(e.clientX);
-
+        updateBrightness(e.clientX); // preview only, don’t commit yet
+      
         const move = ev => this._dragging[entity].active && updateBrightness(ev.clientX);
-        const up = () => {
+        const up = ev => {
           if (!this._dragging[entity].active) return;
           this._dragging[entity].active = false;
           track.releasePointerCapture(e.pointerId);
-          updateBrightness(e.clientX, true);
+          updateBrightness(ev.clientX, true); // commit final brightness
           track.removeEventListener("pointermove", move);
           track.removeEventListener("pointerup", up);
           track.removeEventListener("pointercancel", up);
         };
-
+      
         track.addEventListener("pointermove", move);
         track.addEventListener("pointerup", up);
         track.addEventListener("pointercancel", up);
@@ -309,7 +312,11 @@ class LightGroupCard extends HTMLElement {
     const cardBg = getComputedStyle(this).backgroundColor || "rgb(28,28,28)";
     const rgbMatch = cardBg.match(/(\d+),\s*(\d+),\s*(\d+)/);
     const cardRgb = rgbMatch ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])] : [28,28,28];
-    const offBg = `rgb(${Math.min(255, cardRgb[0] + 13)}, ${Math.min(255, cardRgb[1] + 13)}, ${Math.min(255, cardRgb[2] + 13)})`;
+    const offBg = `rgb(
+       ${Math.min(255, Math.round(cardRgb[0] * 1.05))},
+       ${Math.min(255, Math.round(cardRgb[1] * 1.05))},
+       ${Math.min(255, Math.round(cardRgb[2] * 1.05))}
+    )`;
 
     this.shadowRoot.querySelectorAll(".item, .group > .header").forEach(el => {
       const entity = el.dataset.entity || el.closest(".group").dataset.entity;
