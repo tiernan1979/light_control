@@ -1,10 +1,11 @@
 /* -------------------------------------------------
    light-group-card.js
-   – Fixed: t is not defined
-   – OFF: +5% brighter than card
-   – Sliding: live feedback
-   – Individuals: own rgb_color
+   – Sliding: works from OFF/ON → exact %
+   – Fill: visible when OFF (uses rgb_color or default)
+   – Fill: live update when ON
+   – Individuals: own rgb_color + visible when OFF
    – No refresh loop
+   – OFF: +5% brighter
    – padding: YAML config
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
@@ -13,6 +14,7 @@ class LightGroupCard extends HTMLElement {
     this._dragging = {};
     this._lastStates = {};
     this._expandedCache = new Set();
+    this._defaultRgb = [85, 85, 85]; // fallback
     this.attachShadow({ mode: "open" });
   }
 
@@ -68,8 +70,8 @@ class LightGroupCard extends HTMLElement {
         }
         .header .chevron:active { opacity: 0.7; }
 
-        .header .name { flex: 1; font-weight: 500; z-index: 3; position: relative; color: #fff; }
-        .header .lux { font-size: 14px; color: #ccc; cursor: pointer; z-index: 3; position: relative; }
+        .header .name { flex: 1; font-weight: 500; position: relative; color: #fff; }
+        .header .lux { font-size: 14px; color: #ccc; cursor: pointer; position: relative; }
 
         .header .percent {
           position: absolute;
@@ -157,7 +159,7 @@ class LightGroupCard extends HTMLElement {
         if (el === percentEl) percentEl = clone;
       });
 
-      this._dragging[entity] = { active: false, lastPct: 0 };
+      this._dragging[entity] = { active: false, lastPct: 0, lastRgb: this._defaultRgb };
 
       const updateBrightness = (clientX, commit = false) => {
         const rect = track.getBoundingClientRect();
@@ -165,17 +167,25 @@ class LightGroupCard extends HTMLElement {
         const width = rect.width;
         const pct = Math.max(0, Math.min(100, Math.round((offsetX / width) * 100)));
 
-        // LIVE UPDATE
+        // LIVE UI UPDATE
         header.style.setProperty("--percent", pct + "%");
         percentEl.textContent = pct + "%";
 
-        if (commit && this._dragging[entity].lastPct !== pct) {
+        // Get current rgb (from state or last known)
+        const st = this._hass.states[entity];
+        const rgb = (st && st.attributes && st.attributes.rgb_color) ? st.attributes.rgb_color : this._dragging[entity].lastRgb;
+        const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.4)`;
+        header.style.setProperty("--light-fill", fillRgba);
+        fill.style.background = fillRgba;
+
+        if (commit) {
+          this._dragging[entity].lastPct = pct;
+          this._dragging[entity].lastRgb = rgb;
           if (pct > 0) {
             this._hass.callService("light", "turn_on", { entity_id: entity, brightness_pct: pct });
           } else {
             this._hass.callService("light", "turn_off", { entity_id: entity });
           }
-          this._dragging[entity].lastPct = pct;
         }
       };
 
@@ -291,7 +301,7 @@ class LightGroupCard extends HTMLElement {
 
       const on = st.state === "on";
       const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness / 2.55) : 0;
-      const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : cardRgb;
+      const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : this._defaultRgb;
       const hex = this._rgbToHex(rgb);
 
       const key = `${on}|${bri}|${hex}`;
@@ -305,15 +315,12 @@ class LightGroupCard extends HTMLElement {
         hdr.style.setProperty("--off-bg", offBg);
         if (!on) {
           hdr.style.background = offBg;
-          fill.style.background = "transparent";
         }
 
-        // ON: 40% opacity fill
-        if (on) {
-          const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.4)`;
-          hdr.style.setProperty("--light-fill", fillRgba);
-          fill.style.background = fillRgba;
-        }
+        // Fill: always visible (even when OFF during drag)
+        const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.4)`;
+        hdr.style.setProperty("--light-fill", fillRgba);
+        fill.style.background = fillRgba;
 
         // Icon: lighter
         const hsl = this._rgbToHsl(rgb[0], rgb[1], rgb[2]);
