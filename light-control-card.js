@@ -81,29 +81,28 @@ class LightGroupCard extends HTMLElement {
       html += placeholder;
     }
     container.innerHTML = html;
+    // set initial slider fill for individuals
+    container.querySelectorAll(".header").forEach(hdr => {
+      const entityId = hdr.closest(".item")?.dataset.entity;
+      const st = this._hass.states[entityId];
+      if (!st) return;
+      const on = st.state === "on";
+      const bri = on && st.attributes.brightness
+        ? Math.round(st.attributes.brightness / 2.55)
+        : 0;
+      const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : this._defaultRgb;
+      const rgba = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${on?0.4:0.25})`;
+    
+      hdr.style.setProperty("--pct", `${bri}%`);
+      hdr.style.setProperty("--fill", rgba);
+      hdr.querySelector(".slider-fill").style.background = rgba;
+      hdr.querySelector(".percent").textContent = `${bri}%`;
+    
+      if (!this._dragging[entityId]) this._dragging[entityId] = { active: false, lastPct: bri, lastRgb: rgb };
+      else this._dragging[entityId].lastRgb = rgb;
+    });   
   }
 
-   // set initial slider fill for individuals
-   container.querySelectorAll(".header").forEach(hdr => {
-     const entityId = hdr.closest(".item")?.dataset.entity;
-     const st = this._hass.states[entityId];
-     if (!st) return;
-     const on = st.state === "on";
-     const bri = on && st.attributes.brightness
-       ? Math.round(st.attributes.brightness / 2.55)
-       : 0;
-     const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : this._defaultRgb;
-     const rgba = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${on?0.4:0.25})`;
-   
-     hdr.style.setProperty("--pct", `${bri}%`);
-     hdr.style.setProperty("--fill", rgba);
-     hdr.querySelector(".slider-fill").style.background = rgba;
-     hdr.querySelector(".percent").textContent = `${bri}%`;
-   
-     if (!this._dragging[entityId]) this._dragging[entityId] = { active: false, lastPct: bri, lastRgb: rgb };
-     else this._dragging[entityId].lastRgb = rgb;
-   });   
-   
   /* ------------------------------------------------- */
   _attachHandlers() {
     // re-attach every time we rebuild the DOM (initial + individuals)
