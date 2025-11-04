@@ -118,6 +118,12 @@ class LightGroupCard extends HTMLElement {
 
         .individuals { margin-top: 8px; display: none; }
         .individuals.show { display: block; }
+        .individuals .header {
+          margin-left: 24px;
+          height: 40px;
+          font-size: 14px;
+          opacity: 0.9;
+        }
       </style>
       <div class="groups"></div>
     `;
@@ -130,8 +136,9 @@ class LightGroupCard extends HTMLElement {
         ? `<span class="lux" data-entity="${g.lux_sensor}">-- lx</span>`
         : "";
       const manual = JSON.stringify(g.lights || []).replace(/"/g, "&quot;");
-      const lightCount = (g.lights && g.lights.length) || 0;
-      const isSingle = lightCount <= 1;
+      const allLights = g.lights || (g.entity ? [g.entity] : []);
+      const isSingle = allLights.length === 1;
+
       const iconName = isSingle ? (g.icon || "mdi:lightbulb") : (g.icon || "mdi:lightbulb-group");
       const chevronHtml = isSingle ? "" : `<ha-icon class="chevron" icon="mdi:chevron-right"></ha-icon>`;
       
@@ -202,19 +209,21 @@ class LightGroupCard extends HTMLElement {
         if (commit) {
           this._dragging[entity].lastPct = pct;
           this._dragging[entity].lastRgb = rgb;
-      
-          if (pct <= 0) {
+         
+          const st = this._hass.states[entity];
+          const isOn = st && st.state === "on";
+         
+          if (pct === 0) {
             this._hass.callService("light", "turn_off", { entity_id: entity });
           } else {
-            // ✅ only turn_on if off; otherwise just adjust brightness
-            const isOn = st && st.state === "on";
+            // ✅ Always set brightness, whether off or on
             this._hass.callService("light", "turn_on", {
               entity_id: entity,
-              brightness_pct: pct,
-              transition: isOn ? 0.2 : 0.5
+              brightness_pct: pct
             });
           }
         }
+
       };
 
 
