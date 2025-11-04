@@ -1,12 +1,11 @@
 /* -------------------------------------------------
    light-group-card.js
-   – Icon: lighter version of light color
-   – Text: always white
-   – Slider: 40% opacity (or brightness-matched)
+   – Text & %: always white
+   – OFF: card bg +15% lighter
+   – ON: slider = light color (40% opacity)
    – Individual sliders: same color
-   – Dragging works
-   – Chevron: > / down arrow
-   – Single click = toggle
+   – Dragging: smooth
+   – Icon: lighter version of light color
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
   constructor() {
@@ -46,8 +45,8 @@ class LightGroupCard extends HTMLElement {
           cursor: pointer;
           overflow: hidden;
           box-shadow: 0 2px 4px rgba(0,0,0,.3), inset 0 1px 2px rgba(255,255,255,.1);
+          background: var(--off-bg, #333);
         }
-        .header.off { background: #333; }
 
         .header ha-icon.icon {
           font-size: 24px;
@@ -79,7 +78,7 @@ class LightGroupCard extends HTMLElement {
           font-weight: bold;
           pointer-events: none;
           z-index: 2;
-          transition: color 0.1s ease;
+          color: #fff;
         }
 
         .slider-fill {
@@ -115,7 +114,7 @@ class LightGroupCard extends HTMLElement {
       const manual = JSON.stringify(g.lights || []).replace(/"/g, "&quot;");
       html += `
         <div class="group" data-entity="${g.entity || ""}" data-manual="${manual}">
-          <div class="header off" data-type="group">
+          <div class="header" data-type="group">
             <ha-icon class="icon" icon="${g.icon || "mdi:lightbulb-group"}"></ha-icon>
             <span class="name">${g.name}</span>
             ${lux}
@@ -166,17 +165,6 @@ class LightGroupCard extends HTMLElement {
 
         header.style.setProperty("--percent", pct + "%");
         percentEl.textContent = pct + "%";
-        header.classList.toggle("off", pct === 0);
-
-        // Dynamic % color
-        const fillColor = getComputedStyle(header).getPropertyValue("--light-fill").trim();
-        const rgbMatch = fillColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
-        const rgb = rgbMatch ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])] : [85,85,85];
-        const lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
-
-        const percentCenterX = percentEl.getBoundingClientRect().left - rect.left + (percentEl.offsetWidth / 2);
-        const underFill = percentCenterX <= (width * pct / 100);
-        percentEl.style.color = underFill ? (lum > 0.5 ? "#000" : "#fff") : "#fff";
 
         if (commit) {
           if (pct > 0) {
@@ -187,6 +175,7 @@ class LightGroupCard extends HTMLElement {
         }
       };
 
+      // DRAG WORKS
       track.addEventListener("pointerdown", e => {
         e.preventDefault();
         this._dragging[entity] = true;
@@ -264,7 +253,7 @@ class LightGroupCard extends HTMLElement {
 
       const html = `
         <div class="item" data-entity="${l.entity}">
-          <div class="header off">
+          <div class="header">
             <ha-icon class="icon" icon="${icon}"></ha-icon>
             <span class="name">${name}</span>
             <span class="percent">${bri}%</span>
@@ -280,6 +269,13 @@ class LightGroupCard extends HTMLElement {
 
   set hass(hass) {
     this._hass = hass;
+
+    // Get card background once
+    const cardBg = getComputedStyle(this).backgroundColor || "rgb(28,28,28)";
+    const rgbMatch = cardBg.match(/(\d+),\s*(\d+),\s*(\d+)/);
+    const cardRgb = rgbMatch ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])] : [28,28,28];
+    const offBg = `rgb(${Math.min(255, cardRgb[0] + 38)}, ${Math.min(255, cardRgb[1] + 38)}, ${Math.min(255, cardRgb[2] + 38)})`;
+
     this.shadowRoot.querySelectorAll(".item, .group > .header").forEach(el => {
       const entity = el.dataset.entity || el.closest(".group").dataset.entity;
       if (!entity) return;
@@ -289,7 +285,7 @@ class LightGroupCard extends HTMLElement {
 
       const on = st.state === "on";
       const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness / 2.55) : 0;
-      const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : [85, 85, 85];
+      const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : cardRgb;
       const hex = this._rgbToHex(rgb);
 
       const key = `${on}|${bri}|${hex}`;
@@ -299,29 +295,31 @@ class LightGroupCard extends HTMLElement {
         const percentEl = hdr.querySelector(".percent");
         const icon = hdr.querySelector(".icon");
 
-        // 1. Slider fill: 40% opacity
-        const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.4)`;
-        hdr.style.setProperty("--light-fill", fillRgba);
-        fill.style.background = fillRgba;
+        // OFF: slightly lighter background
+        hdr.style.setProperty("--off-bg", offBg);
+        if (!on) {
+          hdr.style.background = offBg;
+        }
 
-        // 2. Icon: lighter version (HSL +60% lightness)
+        // ON: slider fill with 40% opacity
+        if (on) {
+          const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.4)`;
+          hdr.style.setProperty("--light-fill", fillRgba);
+          fill.style.background = fillRgba;
+        } else {
+          fill.style.background = "transparent";
+        }
+
+        // Icon: lighter version
         const hsl = this._rgbToHsl(rgb[0], rgb[1], rgb[2]);
         const lightHsl = `hsl(${hsl.h}, ${hsl.s}%, ${Math.min(100, hsl.l + 60)}%)`;
         icon.style.color = lightHsl;
 
-        // 3. Update percent
+        // Update percent
         hdr.style.setProperty("--percent", bri + "%");
         percentEl.textContent = bri + "%";
-        hdr.classList.toggle("off", bri === 0);
 
-        // 4. % label: dynamic
-        const rect = hdr.getBoundingClientRect();
-        const percentCenterX = percentEl.getBoundingClientRect().left - rect.left + (percentEl.offsetWidth / 2);
-        const underFill = percentCenterX <= (rect.width * bri / 100);
-        const lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
-        percentEl.style.color = underFill ? (lum > 0.5 ? "#000" : "#fff") : "#fff";
-
-        // 5. Chevron
+        // Chevron
         const chevron = hdr.querySelector(".chevron");
         if (chevron) {
           const expanded = hdr.closest(".group")?.classList.contains("expanded");
