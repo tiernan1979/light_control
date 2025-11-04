@@ -1,10 +1,10 @@
 /* -------------------------------------------------
    light-group-card.js
-   – Header = full control (tap = toggle, drag = brightness)
-   – Full bar coloured, icon opens colour picker
-   – Chevron (right) expands group (mobile-friendly)
+   – Full bar coloured
+   – Icon opens colour picker
+   – Chevron expands group (mobile)
    – 1 % brightness steps
-   – Configurable bar height
+   – bar_height configurable
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
   constructor() {
@@ -180,7 +180,7 @@ class LightGroupCard extends HTMLElement {
       const up = () => {
         if (!this._dragging[entity]) return;
         this._dragging[entity] = false;
-50        track.releasePointerCapture(e.pointerId);
+        track.releasePointerCapture(e.pointerId);
         set(e.clientX, true);
         track.removeEventListener("pointermove", move);
         track.removeEventListener("pointerup", up);
@@ -215,7 +215,7 @@ class LightGroupCard extends HTMLElement {
   }
 
   /* -------------------------------------------------
-     INDIVIDUAL LIGHTS (same header style)
+     INDIVIDUAL LIGHTS
   ------------------------------------------------- */
   _loadIndividuals(groupId, container) {
     if (!this._hass) return;
@@ -295,7 +295,7 @@ class LightGroupCard extends HTMLElement {
         hdr.querySelector(".percent").textContent = bri + "%";
         hdr.classList.toggle("off", bri === 0);
 
-        // make text readable on bright colours
+        // readable text on bright colours
         if (on) {
           const { r, g, b } = this._hexToRgb(hex);
           const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
@@ -307,7 +307,7 @@ class LightGroupCard extends HTMLElement {
         this._lastStates[entity] = key;
       }
 
-      // lux sensor (group only)
+      // lux sensor
       const lux = el.querySelector(".lux");
       if (lux) {
         const s = hass.states[lux.dataset.entity];
@@ -315,7 +315,7 @@ class LightGroupCard extends HTMLElement {
         lux.textContent = v !== null ? `${v} lx` : "-- lx";
       }
 
-      // reload individuals if group is expanded
+      // reload individuals if expanded
       const grp = el.closest(".group");
       if (grp && grp.classList.contains("expanded")) {
         this._loadIndividuals(grp.dataset.entity, grp.querySelector(".individuals"));
@@ -331,12 +331,9 @@ class LightGroupCard extends HTMLElement {
       .slice(1)
       .match(/.{2}/g)
       .map(v => parseInt(v, 16));
-    r = Math.round((r * (100 + pct)) / 100);
-    g = Math.round((g * (100 + pct)) / 100);
-    b = Math.round((b * (100 + pct)) / 100);
-    r = r > 255 ? 255 : r;
-    g = g > 255 ? 255 : g;
-    b = b > 255 ? 255 : b;
+    r = Math.min(255, Math.round((r * (100 + pct)) / 100));
+    g = Math.min(255, Math.round((g * (100 + pct)) / 100));
+    b = Math.min(255, Math.round((b * (100 + pct)) / 100));
     return `#${r.toString(16).padStart(2, "0")}${g
       .toString(16)
       .padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
