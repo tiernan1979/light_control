@@ -1,30 +1,19 @@
 /* -------------------------------------------------
-   light-group-card.js
-   – GROUP: click = turn ALL ON (not toggle)
+   light-group-card.js  (fixed)
+   – GROUP: click = turn ALL ON (no toggle)
    – COLOR: only changes ON lights
-   – MIXED: no wrong toggling
+   – MIXED: correct % and no accidental toggles
    – Dragging: smooth, exact %
    – Fill: visible when OFF + ON
    – Padding: between groups
-   – Individuals: own rgb_color
+   – Individuals: own rgb_color + own slider
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
   constructor() {
     super();
     this._dragging = {};
     this._lastStates = {};
-    this._expandedCache = new Set();
-    // ✅ derive default color from card background (5% lighter)
-    const cardBgRaw = getComputedStyle(document.documentElement)
-      .getPropertyValue("--ha-card-background")
-      || getComputedStyle(document.documentElement)
-      .getPropertyValue("--card-background-color")
-      || "rgb(28,28,28)";
-    const rgbMatch = cardBgRaw.match(/(\d+),\s*(\d+),\s*(\d+)/);
-    const baseRgb = rgbMatch
-      ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])]
-      : [28, 28, 28];
-    this._defaultRgb = baseRgb.map(v => Math.min(255, Math.round(v * 1.05)));
+    this._expanded = new Set();
     this.attachShadow({ mode: "open" });
   }
 
@@ -34,304 +23,205 @@ class LightGroupCard extends HTMLElement {
 
     this.config = config;
     const barHeight = config.bar_height || 48;
-    const groupPadding = config.padding !== undefined ? config.padding : 8;
+    const pad = config.padding ?? 8;
 
     this.shadowRoot.innerHTML = `
       <style>
-        :host {
-          font-family: 'Roboto', sans-serif;
-          background: var(--ha-card-background, var(--card-background-color, #1c1c1c));
-          color: #fff;
-          border-radius: 12px;
-          padding: 16px;
-          display: block;
-          user-select: none;
-        }
-        .groups { }
-        .group {
-          margin-top: ${groupPadding}px;
-        }
-        .group:first-child { margin-top: 0; }
-        .header {
-          position: relative;
-          display: flex;
-          align-items: center;
-          gap: 8px;
-          height: ${barHeight}px;
-          padding: 0 12px;
-          border-radius: 12px;
-          cursor: pointer;
-          overflow: hidden;
-          box-shadow: 0 2px 4px rgba(0,0,0,.3), inset 0 1px 2px rgba(255,255,255,.1);
-          background: var(--off-bg, #333);
-        }
-
-        .header ha-icon.icon {
-          lavor: 24px;
-          cursor: pointer;
-          z-index: 3;
-          pointer-events: auto;
-          position: relative;
-        }
-        .header ha-icon.chevron {
-          font-size: 22px;
-          cursor: pointer;
-          z-index: 3;
-          pointer-events: auto;
-          position: relative;
-          padding: 6px;
-          transition: transform .2s;
-        }
-        .header .chevron:active { opacity: 0.7; }
-
-        .header .name { flex: 1; font-weight: 500; position: relative; color: #fff; }
-        .header .lux { font-size: 14px; color: #ccc; cursor: pointer; position: relative; }
-
-        .header .percent {
-          position: absolute;
-          right: 56px;
-          top: 50%;
-          transform: translateY(-50%);
-          font-size: 14px;
-          font-weight: bold;
-          pointer-events: none;
-          z-index: 2;
-          color: #fff;
-        }
-
-        .slider-fill {
-          position: absolute;
-          left: 0; top: 0; height: 100%;
-          width: var(--percent, 0%);
-          background: var(--light-fill, rgba(85,85,85,0.4));
-          border-radius: 12px;
-          z-index: 1;
-          transition: width 0.03s ease;
-        }
-        .slider-track {
-          position: absolute;
-          inset: 0;
-          border-radius: 12px;
-          cursor: pointer;
-          z-index: 2;
-        }
-
-        .individuals { margin-top: 8px; display: none; }
-        .individuals.show { display: block; }
-        .individuals .header {
-          margin-left: 24px;
-          height: 40px;
-          font-size: 14px;
-          opacity: 0.9;
-        }
+        :host{display:block;font-family:Roboto,sans-serif;background:var(--ha-card-background,#1c1c1c);color:#fff;border-radius:12px;padding:16px;}
+        .groups{margin-top:-${pad}px}
+        .group{margin-top:${pad}px}
+        .header{position:relative;display:flex;align-items:center;gap:8px;height:${barHeight}px;padding:0 12px;border-radius:12px;cursor:pointer;overflow:hidden;
+                background:var(--off-bg,#333);box-shadow:0 2px 4px rgba(0,0,0,.3), inset 0 1px 2px rgba(255,255,255,.1);}
+        ha-icon{flex-shrink:0}
+        .icon{width:24px;height:24px}
+        .chevron{font-size:22px;transition:transform .2s}
+        .name{flex:1;font-weight:500}
+        .lux{font-size:14px;color:#ccc}
+        .percent{position:absolute;right:56px;top:50%;transform:translateY(-50%);font-weight:bold;pointer-events:none;z-index:2}
+        .slider-fill{position:absolute;inset:0;width:var(--pct,0%);background:var(--fill,rgba(85,85,85,.4));border-radius:12px;z-index:1;transition:width .03s}
+        .slider-track{position:absolute;inset:0;border-radius:12px;z-index:2;cursor:pointer}
+        .individuals{margin-top:8px;display:none}
+        .individuals.show{display:block}
+        .individuals .header{margin-left:24px;height:40px;font-size:14px;opacity:.9}
       </style>
       <div class="groups"></div>
     `;
 
-    const groupsDiv = this.shadowRoot.querySelector(".groups");
+    this._renderGroups();
+    this._attachHandlers();
+  }
+
+  /* ------------------------------------------------- */
+  _renderGroups() {
+    const container = this.shadowRoot.querySelector(".groups");
     let html = "";
 
-    config.groups.forEach(g => {
+    for (const g of this.config.groups) {
       const lux = g.lux_sensor
         ? `<span class="lux" data-entity="${g.lux_sensor}">-- lx</span>`
         : "";
       const manual = JSON.stringify(g.lights || []).replace(/"/g, "&quot;");
-// Determine if this is a group light (has children)
-let isSingle = true;
 
-      // Manually listed lights in YAML
-      if (g.lights && g.lights.length > 1) {
-        isSingle = false;
-      } else if (g.entity && this._hass?.states?.[g.entity]?.attributes?.entity_id?.length > 1) {
-        // HA light group with multiple child entities
-        isSingle = false;
-      }      
-      const iconName = isSingle ? (g.icon || "mdi:lightbulb") : (g.icon || "mdi:lightbulb-group");
-      const chevronHtml = isSingle ? "" : `<ha-icon class="chevron" icon="mdi:chevron-right"></ha-icon>`;
-      
-      html += `
-        <div class="group" data-entity="${g.entity || ""}" data-manual="${manual}" data-single="${isSingle}">
+      // -------------------------------------------------
+      // 1. decide icon / chevron once (will be refreshed in hass)
+      // -------------------------------------------------
+      const placeholder = `
+        <div class="group" data-entity="${g.entity || ""}" data-manual="${manual}">
           <div class="header" data-type="group">
-            <ha-icon class="icon" icon="${iconName}"></ha-icon>
+            <ha-icon class="icon"></ha-icon>
             <span class="name">${g.name}</span>
             ${lux}
             <span class="percent">0%</span>
-            ${chevronHtml}
+            <ha-icon class="chevron"></ha-icon>
             <div class="slider-fill"></div>
             <div class="slider-track"></div>
           </div>
           <div class="individuals"></div>
         </div>`;
-
-    });
-
-    groupsDiv.innerHTML = html;
-    this._attachAll();
+      html += placeholder;
+    }
+    container.innerHTML = html;
   }
 
-  _attachAll() {
+  /* ------------------------------------------------- */
+  _attachHandlers() {
+    // re-attach every time we rebuild the DOM (initial + individuals)
     this.shadowRoot.querySelectorAll(".header").forEach(header => {
-      const entity = header.parentElement.dataset.entity || header.closest(".group").dataset.entity;
-      if (!entity) return;
+      const groupEl = header.closest(".group");
+      const entity = groupEl.dataset.entity || null;
 
-      let track = header.querySelector(".slider-track");
-      let fill = header.querySelector(".slider-fill");
-      let icon = header.querySelector(".icon");
-      let chevron = header.querySelector(".chevron");
-      let percentEl = header.querySelector(".percent");
-      const isGroup = header.dataset.type === "group";
+      // sliders
+      const track = header.querySelector(".slider-track");
+      const fill  = header.querySelector(".slider-fill");
+      const pctEl = header.querySelector(".percent");
+      const icon  = header.querySelector(".icon");
+      const chev  = header.querySelector(".chevron");
 
-      // Clone & re-attach
-      [track, fill, icon, chevron].forEach(el => {
-        if (!el) return;
-        const clone = el.cloneNode(true);
-        el.parentNode.replaceChild(clone, el);
-        if (el === track) track = clone;
-        if (el === fill) fill = clone;
-        if (el === icon) icon = clone;
-        if (el === chevron) chevron = clone;
-        if (el === percentEl) percentEl = clone;
-      });
+      // initialise dragging state
+      if (entity && !this._dragging[entity]) {
+        this._dragging[entity] = { active: false, lastPct: 0, lastRgb: this._defaultRgb };
+      }
 
-      this._dragging[entity] = { active: false, lastPct: 0, lastRgb: this._defaultRgb };
+      const commitBrightness = (pct, commit) => {
+        header.style.setProperty("--pct", `${pct}%`);
+        pctEl.textContent = `${pct}%`;
 
-      const updateBrightness = (clientX, commit = false) => {
-        const rect = track.getBoundingClientRect();
-        const offsetX = clientX - rect.left;
-        const width = rect.width;
-        const pct = Math.max(0, Math.min(100, Math.round((offsetX / width) * 100)));
-      
-        header.style.setProperty("--percent", pct + "%");
-        percentEl.textContent = pct + "%";
-      
-        const st = this._hass.states[entity];
-        const rgb = (st && st.attributes && st.attributes.rgb_color)
-          ? st.attributes.rgb_color
-          : this._dragging[entity].lastRgb;
-      
-        const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.4)`;
-        header.style.setProperty("--light-fill", fillRgba);
-        fill.style.background = fillRgba;
-      
-        if (commit) {
-          const st = this._hass.states[entity];
-          const isOn = st && st.state === "on";
-          const currentPct = st?.attributes.brightness
-            ? Math.round(st.attributes.brightness / 2.55)
-            : 0;
-        
-          // If slider > 0 → always call turn_on (even if already on)
+        const state = entity ? this._hass.states[entity] : null;
+        const rgb = state?.attributes?.rgb_color ?? this._dragging[entity].lastRgb;
+        const rgba = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${pct>0?0.4:0.25})`;
+        header.style.setProperty("--fill", rgba);
+        fill.style.background = rgba;
+
+        if (commit && entity) {
           if (pct > 0) {
-            const serviceData = { entity_id: entity, brightness_pct: pct };
-        
-            if (st?.attributes.rgb_color) {
-              serviceData.rgb_color = st.attributes.rgb_color; // preserve color
-            }
-        
-            this._hass.callService("light", "turn_on", serviceData);
-          } else if (pct === 0 && isOn) {
-            // Only turn off if slider ends at 0
+            this._hass.callService("light", "turn_on", {
+              entity_id: entity,
+              brightness_pct: pct,
+              rgb_color: rgb
+            });
+          } else if (state?.state === "on") {
             this._hass.callService("light", "turn_off", { entity_id: entity });
           }
         }
+        // remember colour for next drag
+        if (entity) this._dragging[entity].lastRgb = rgb;
       };
 
       track.addEventListener("pointerdown", e => {
-        e.preventDefault();
         e.stopPropagation();
         this._dragging[entity].active = true;
         track.setPointerCapture(e.pointerId);
-      
-        // ✅ Don’t commit on first touch; just preview position
-        updateBrightness(e.clientX);
-      
-        const move = ev => this._dragging[entity].active && updateBrightness(ev.clientX);
+
+        const move = ev => {
+          if (!this._dragging[entity].active) return;
+          const rect = track.getBoundingClientRect();
+          const x = ev.clientX - rect.left;
+          const pct = Math.max(0, Math.min(100, Math.round((x / rect.width) * 100)));
+          commitBrightness(pct, false);
+        };
         const up = ev => {
           if (!this._dragging[entity].active) return;
           this._dragging[entity].active = false;
           track.releasePointerCapture(e.pointerId);
-          updateBrightness(ev.clientX, true); // ✅ commit final brightness
+          const rect = track.getBoundingClientRect();
+          const x = ev.clientX - rect.left;
+          const pct = Math.max(0, Math.min(100, Math.round((x / rect.width) * 100)));
+          commitBrightness(pct, true);
           track.removeEventListener("pointermove", move);
-          track.removeEventListener("pointerup", up);
-          track.removeEventListener("pointercancel", up);
         };
-      
+
         track.addEventListener("pointermove", move);
         track.addEventListener("pointerup", up);
         track.addEventListener("pointercancel", up);
+        move(e); // preview on first touch
       });
 
-
-      icon.addEventListener("click", e => {
+      // icon → more-info
+      icon?.addEventListener("click", e => {
         e.stopPropagation();
-        const ev = new Event("hass-more-info", { bubbles: true, composed: true });
-        ev.detail = { entityId: entity };
-        header.dispatchEvent(ev);
+        this.dispatchEvent(new CustomEvent("hass-more-info", {
+          bubbles: true, composed: true,
+          detail: { entityId: entity }
+        }));
       });
 
-      if (isGroup && chevron) {
-        chevron.addEventListener("click", e => {
-          e.stopPropagation();
-          const grp = header.parentElement;
-          const expanded = grp.classList.toggle("expanded");
-          const individuals = grp.querySelector(".individuals");
-          individuals.classList.toggle("show", expanded);
-          chevron.setAttribute("icon", expanded ? "mdi:chevron-down" : "mdi:chevron-right");
-          if (expanded && !this._expandedCache.has(entity)) {
-            this._loadIndividuals(entity, individuals);
-            this._expandedCache.add(entity);
-          }
-        });
-      }
+      // chevron → expand
+      chev?.addEventListener("click", e => {
+        e.stopPropagation();
+        const expanded = groupEl.classList.toggle("expanded");
+        groupEl.querySelector(".individuals").classList.toggle("show", expanded);
+        chev.setAttribute("icon", expanded ? "mdi:chevron-down" : "mdi:chevron-right");
+        if (expanded && entity && !this._expanded.has(entity)) {
+          this._loadIndividuals(entity, groupEl.querySelector(".individuals"));
+          this._expanded.add(entity);
+        }
+      });
 
-      // FIXED: Group click = turn ALL ON
+      // header click → group = always turn ON, single = toggle
       header.addEventListener("click", e => {
-        if (e.target.closest(".icon") || e.target.closest(".chevron") || e.target.closest(".lux")) return;
-      
-        const st = this._hass.states[entity];
-        const isGroup = header.dataset.type === "group";
-      
+        if (e.target.closest(".icon,.chevron,.lux")) return;
+        const state = entity ? this._hass.states[entity] : null;
+        const isGroup = state?.attributes?.entity_id?.length > 1;
+
         if (isGroup) {
-          // GROUP: toggle all
-          const allOn = st && st.attributes && st.attributes.entity_id
-            ? st.attributes.entity_id.every(id => this._hass.states[id]?.state === "on")
-            : false;
-          this._hass.callService("light", allOn ? "turn_off" : "turn_on", { entity_id: entity });
+          // GROUP: always turn ON (no toggle)
+          this._hass.callService("light", "turn_on", { entity_id: entity });
         } else {
-          // INDIVIDUAL: toggle
-          const turnOn = !st || st.state === "off";
+          // SINGLE: normal toggle
+          const turnOn = !state || state.state === "off";
           this._hass.callService("light", turnOn ? "turn_on" : "turn_off", { entity_id: entity });
         }
       });
     });
   }
 
+  /* ------------------------------------------------- */
   _loadIndividuals(groupId, container) {
-    if (!this._hass) return;
-    const grp = container.closest(".group");
-    const manual = JSON.parse(grp.dataset.manual.replace(/&quot;/g, '"'));
-    const group = groupId ? this._hass.states[groupId] : null;
-    const ids = group?.attributes?.entity_id || [];
-    const all = [];
+    const groupState = this._hass.states[groupId];
+    const manual = JSON.parse(container.closest(".group").dataset.manual.replace(/&quot;/g, '"'));
+    const ids = groupState?.attributes?.entity_id || [];
 
-    ids.forEach(id => { const s = this._hass.states[id]; if (s) all.push({ entity: id, state: s }); });
+    const all = [];
+    ids.forEach(id => {
+      const s = this._hass.states[id];
+      if (s) all.push({ entity: id, state: s });
+    });
     manual.forEach(m => {
       const s = this._hass.states[m.entity];
       if (s) all.push({ entity: m.entity, state: s, name: m.name, icon: m.icon });
     });
 
-    const seen = new Set();
-    const uniq = all.filter(l => !seen.has(l.entity) && seen.add(l.entity));
+    const uniq = [...new Map(all.map(o => [o.entity, o])).values()];
 
-    container.innerHTML = "";
-    uniq.forEach(l => {
+    container.innerHTML = uniq.map(l => {
       const st = l.state;
-      const on = st.state === "on";
-      const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness / 2.55) : 0;
+      const bri = st.state === "on" && st.attributes.brightness
+        ? Math.round(st.attributes.brightness / 2.55)
+        : 0;
       const name = l.name || st.attributes.friendly_name || l.entity.split(".").pop();
       const icon = l.icon || st.attributes.icon || "mdi:lightbulb";
 
-      const html = `
+      return `
         <div class="item" data-entity="${l.entity}">
           <div class="header">
             <ha-icon class="icon" icon="${icon}"></ha-icon>
@@ -341,128 +231,93 @@ let isSingle = true;
             <div class="slider-track"></div>
           </div>
         </div>`;
-      container.insertAdjacentHTML("beforeend", html);
+    }).join("");
+
+    this._attachHandlers(); // individuals now have their own sliders
+  }
+
+  /* ------------------------------------------------- */
+  set hass(hass) {
+    this._hass = hass;
+
+    // ---- derive off-bg colour (5 % lighter than card) ----
+    const bg = getComputedStyle(document.documentElement)
+      .getPropertyValue("--ha-card-background") ||
+      getComputedStyle(document.documentElement)
+      .getPropertyValue("--card-background-color") ||
+      "rgb(28,28,28)";
+    const m = bg.match(/(\d+),\s*(\d+),\s*(\d+)/);
+    const base = m ? m.slice(1).map(Number) : [28,28,28];
+    const off = base.map(v => Math.min(255, Math.round(v * 1.05)));
+    this._defaultRgb = off;
+    const offBg = `rgb(${off.join()})`;
+
+    // ---- update every header (group + individuals) ----
+    this.shadowRoot.querySelectorAll(".header").forEach(hdr => {
+      const entity = hdr.closest(".group")?.dataset.entity ||
+                     hdr.closest(".item")?.dataset.entity;
+      if (!entity) return;
+
+      const st = hass.states[entity];
+      if (!st) return;
+
+      const isGroup = st.attributes?.entity_id?.length > 1;
+      const on = st.state === "on";
+      const bri = on && st.attributes.brightness
+        ? Math.round(st.attributes.brightness / 2.55)
+        : 0;
+
+      // colour handling
+      const rgb = on && st.attributes.rgb_color ? st.attributes.rgb_color : this._defaultRgb;
+      const rgba = `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${on?0.4:0.25})`;
+      const hsl = this._rgbToHsl(...rgb);
+      const iconHsl = `hsl(${hsl.h},${hsl.s}%,${Math.min(100,hsl.l+60)}%)`;
+
+      const key = `${entity}|${on}|${bri}|${rgb}`;
+      if (this._lastStates[entity] === key) return;
+      this._lastStates[entity] = key;
+
+      // background
+      hdr.style.setProperty("--off-bg", offBg);
+      hdr.style.background = on ? "none" : offBg;
+
+      // fill + percent
+      hdr.style.setProperty("--pct", `${bri}%`);
+      hdr.style.setProperty("--fill", rgba);
+      hdr.querySelector(".slider-fill").style.background = rgba;
+      hdr.querySelector(".percent").textContent = `${bri}%`;
+
+      // icon
+      const icon = hdr.querySelector(".icon");
+      icon.style.color = iconHsl;
+      icon.setAttribute("icon", isGroup ? "mdi:lightbulb-group" : "mdi:lightbulb");
+
+      // chevron (only groups)
+      const chev = hdr.querySelector(".chevron");
+      if (chev) {
+        chev.style.display = isGroup ? "block" : "none";
+        const expanded = hdr.closest(".group")?.classList.contains("expanded");
+        chev.setAttribute("icon", expanded ? "mdi:chevron-down" : "mdi:chevron-right");
+      }
+
+      // remember colour for dragging
+      if (this._dragging[entity]) this._dragging[entity].lastRgb = rgb;
     });
 
-    this._attachAll();
-  }
-
-set hass(hass) {
-  this._hass = hass;
-
-  // ✅ Get the card background color from theme
-  const cardBgRaw = getComputedStyle(document.documentElement)
-    .getPropertyValue("--ha-card-background")
-    || getComputedStyle(document.documentElement)
-    .getPropertyValue("--card-background-color")
-    || "rgb(28,28,28)";
-
-  const rgbMatch = cardBgRaw.match(/(\d+),\s*(\d+),\s*(\d+)/);
-  const cardRgb = rgbMatch
-    ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])]
-    : [28, 28, 28];
-
-  // ✅ Slightly lighter (5%) than card color
-  const offBg = `rgb(
-    ${Math.min(255, Math.round(cardRgb[0] * 1.05))},
-    ${Math.min(255, Math.round(cardRgb[1] * 1.05))},
-    ${Math.min(255, Math.round(cardRgb[2] * 1.05))}
-  )`;
-
-  // ✅ Store this derived color as the new default RGB (so individuals use it too)
-  this._defaultRgb = [
-    Math.min(255, Math.round(cardRgb[0] * 1.05)),
-    Math.min(255, Math.round(cardRgb[1] * 1.05)),
-    Math.min(255, Math.round(cardRgb[2] * 1.05))
-  ];
-
-  this.shadowRoot.querySelectorAll(".item, .group > .header").forEach(el => {
-    // Determine the entity for this element
-    const entity = el.dataset.entity || el.closest(".group")?.dataset.entity;
-    if (!entity) return;
-  
-    const st = hass.states[entity];
-    if (!st) return;
-  
-    // Determine if this is a group (entity has multiple members)
-    const isGroup = st.attributes?.entity_id?.length > 1;
-  
-    const on = st.state === "on";
-    const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness / 2.55) : 0;
-  
-    // Use defaultRgb when off
-    const rgb = (on && st.attributes.rgb_color) ? st.attributes.rgb_color : this._defaultRgb;
-    const hex = this._rgbToHex(rgb);
-  
-    const key = `${on}|${bri}|${hex}`;
-    if (this._lastStates[entity] !== key) {
-      const hdr = el.tagName === "DIV" && el.classList.contains("header") ? el : el.querySelector(".header");
-      const fill = hdr.querySelector(".slider-fill");
-      const percentEl = hdr.querySelector(".percent");
-      const icon = hdr.querySelector(".icon");
-  
-      // Default off background
-      hdr.style.setProperty("--off-bg", offBg);
-      if (!on) hdr.style.background = offBg;
-  
-      // Dimmer fill
-      const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${on ? 0.4 : 0.25})`;
-      hdr.style.setProperty("--light-fill", fillRgba);
-      if (fill) fill.style.background = fillRgba;
-  
-      // Light icon color
-      const hsl = this._rgbToHsl(rgb[0], rgb[1], rgb[2]);
-      const lightHsl = `hsl(${hsl.h}, ${hsl.s}%, ${Math.min(100, hsl.l + 60)}%)`;
-      if (icon) {
-        icon.style.color = lightHsl;
-  
-        // Adjust icon for single/group
-        if (isGroup) {
-          icon.setAttribute("icon", "mdi:light-group");
-        } else {
-          icon.setAttribute("icon", "mdi:lightbulb");
-        }
-      }
-  
-      // Show/hide chevron based on group
-      const chevron = hdr.querySelector(".chevron");
-      if (chevron) {
-        chevron.style.display = isGroup ? "" : "none";
-        if (isGroup) {
-          const expanded = hdr.closest(".group")?.classList.contains("expanded");
-          chevron.setAttribute("icon", expanded ? "mdi:chevron-down" : "mdi:chevron-right");
-        }
-      }
-   
-      hdr.style.setProperty("--percent", bri + "%");
-      if (percentEl) percentEl.textContent = bri + "%";
-  
-      this._lastStates[entity] = key;
-    }
-  
-    // Update lux if present
-    const lux = el.querySelector(".lux");
-    if (lux) {
-      const s = hass.states[lux.dataset.entity];
+    // ---- lux sensors ----
+    this.shadowRoot.querySelectorAll(".lux").forEach(el => {
+      const s = hass.states[el.dataset.entity];
       const v = s && !isNaN(s.state) ? Math.round(+s.state) : null;
-      lux.textContent = v !== null ? `${v} lx` : "-- lx";
-    }
-  });
-}
-
-
-  /* -------------------------------------------------
-     HELPERS
-  ------------------------------------------------- */
-  _rgbToHex([r, g, b]) {
-    return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+      el.textContent = v !== null ? `${v} lx` : "-- lx";
+    });
   }
 
+  /* ------------------------------------------------- */
   _rgbToHsl(r, g, b) {
     r /= 255; g /= 255; b /= 255;
     const max = Math.max(r, g, b), min = Math.min(r, g, b);
     let h, s, l = (max + min) / 2;
-    if (max === min) { h = s = 0; }
+    if (max === min) h = s = 0;
     else {
       const d = max - min;
       s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
