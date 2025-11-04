@@ -1,11 +1,12 @@
 /* -------------------------------------------------
    light-group-card.js
-   – Solid colour fill (group + individuals)
-   – % label: white under color, black on top (readable at 78%)
-   – Dragging works (hold + move)
-   – Chevron: > (collapsed) / down arrow (expanded)
+   – Icon: lighter version of light color
+   – Text: always white
+   – Slider: 40% opacity (or brightness-matched)
+   – Individual sliders: same color
+   – Dragging works
+   – Chevron: > / down arrow
    – Single click = toggle
-   – Icon = more-info | Chevron = expand
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
   constructor() {
@@ -27,7 +28,7 @@ class LightGroupCard extends HTMLElement {
         :host {
           font-family: 'Roboto', sans-serif;
           background: var(--ha-card-background, var(--card-background-color, #1c1c1c));
-          color: var(--primary-text-color, #fff);
+          color: #fff;
           border-radius: 12px;
           padding: 16px;
           display: block;
@@ -48,8 +49,7 @@ class LightGroupCard extends HTMLElement {
         }
         .header.off { background: #333; }
 
-        .header ha-icon.icon,
-        .header ha-icon.chevron {
+        .header ha-icon.icon {
           font-size: 24px;
           cursor: pointer;
           z-index: 3;
@@ -58,12 +58,16 @@ class LightGroupCard extends HTMLElement {
         }
         .header ha-icon.chevron {
           font-size: 22px;
+          cursor: pointer;
+          z-index: 3;
+          pointer-events: auto;
+          position: relative;
           padding: 6px;
           transition: transform .2s;
         }
         .header .chevron:active { opacity: 0.7; }
 
-        .header .name { flex: 1; font-weight: 500; z-index: 3; position: relative; }
+        .header .name { flex: 1; font-weight: 500; z-index: 3; position: relative; color: #fff; }
         .header .lux { font-size: 14px; color: #ccc; cursor: pointer; z-index: 3; position: relative; }
 
         .header .percent {
@@ -82,10 +86,10 @@ class LightGroupCard extends HTMLElement {
           position: absolute;
           left: 0; top: 0; height: 100%;
           width: var(--percent, 0%);
-          background: var(--light-color, #555);
+          background: var(--light-fill, rgba(85,85,85,0.4));
           border-radius: 12px;
           z-index: 1;
-          transition: width 0.1s ease;
+          transition: width 0.1s ease, background 0.2s ease;
         }
         .slider-track {
           position: absolute;
@@ -154,22 +158,24 @@ class LightGroupCard extends HTMLElement {
 
       this._dragging[entity] = false;
 
-      // --- DRAG & CLICK (FIXED: no redeclaration of r) ---
-      const set = (clientX, commit = false) => {
-        const rHeader = track.getBoundingClientRect();  // renamed to avoid conflict
-        const off = clientX - rHeader.left;
-        const pct = Math.max(0, Math.min(100, Math.round((off / rHeader.width) * 100)));
+      const updateBrightness = (clientX, commit = false) => {
+        const rect = track.getBoundingClientRect();
+        const offsetX = clientX - rect.left;
+        const width = rect.width;
+        const pct = Math.max(0, Math.min(100, Math.round((offsetX / width) * 100)));
+
         header.style.setProperty("--percent", pct + "%");
         percentEl.textContent = pct + "%";
         header.classList.toggle("off", pct === 0);
 
-        // Dynamic % color: white under fill, black on bright fill
-        const lightColor = header.style.getPropertyValue("--light-color") || "#555";
-        const { r: lightR, g: lightG, b: lightB } = this._hexToRgb(lightColor);
-        const lum = (0.299 * lightR + 0.587 * lightG + 0.114 * lightB) / 255;
+        // Dynamic % color
+        const fillColor = getComputedStyle(header).getPropertyValue("--light-fill").trim();
+        const rgbMatch = fillColor.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+        const rgb = rgbMatch ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])] : [85,85,85];
+        const lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
 
-        const percentX = percentEl.getBoundingClientRect().left - rHeader.left + (percentEl.offsetWidth / 2);
-        const underFill = percentX <= (rHeader.width * pct / 100);
+        const percentCenterX = percentEl.getBoundingClientRect().left - rect.left + (percentEl.offsetWidth / 2);
+        const underFill = percentCenterX <= (width * pct / 100);
         percentEl.style.color = underFill ? (lum > 0.5 ? "#000" : "#fff") : "#fff";
 
         if (commit) {
@@ -185,14 +191,14 @@ class LightGroupCard extends HTMLElement {
         e.preventDefault();
         this._dragging[entity] = true;
         track.setPointerCapture(e.pointerId);
-        set(e.clientX);
+        updateBrightness(e.clientX);
 
-        const move = ev => this._dragging[entity] && set(ev.clientX);
+        const move = ev => this._dragging[entity] && updateBrightness(ev.clientX);
         const up = () => {
           if (!this._dragging[entity]) return;
           this._dragging[entity] = false;
           track.releasePointerCapture(e.pointerId);
-          set(e.clientX, true);
+          updateBrightness(e.clientX, true);
           track.removeEventListener("pointermove", move);
           track.removeEventListener("pointerup", up);
           track.removeEventListener("pointercancel", up);
@@ -203,7 +209,6 @@ class LightGroupCard extends HTMLElement {
         track.addEventListener("pointercancel", up);
       });
 
-      // --- ICON = MORE INFO ---
       icon.addEventListener("click", e => {
         e.stopPropagation();
         const ev = new Event("hass-more-info", { bubbles: true, composed: true });
@@ -211,7 +216,6 @@ class LightGroupCard extends HTMLElement {
         header.dispatchEvent(ev);
       });
 
-      // --- CHEVRON = EXPAND / COLLAPSE ---
       if (isGroup && chevron) {
         chevron.addEventListener("click", e => {
           e.stopPropagation();
@@ -224,7 +228,6 @@ class LightGroupCard extends HTMLElement {
         });
       }
 
-      // --- SINGLE CLICK ANYWHERE ELSE = TOGGLE ---
       header.addEventListener("click", e => {
         if (e.target.closest(".icon") || e.target.closest(".chevron") || e.target.closest(".lux")) return;
         const st = this._hass.states[entity];
@@ -294,40 +297,40 @@ class LightGroupCard extends HTMLElement {
         const hdr = el.tagName === "DIV" && el.classList.contains("header") ? el : el.querySelector(".header");
         const fill = hdr.querySelector(".slider-fill");
         const percentEl = hdr.querySelector(".percent");
+        const icon = hdr.querySelector(".icon");
 
-        // Solid fill color
-        hdr.style.setProperty("--light-color", hex);
-        fill.style.background = hex;
+        // 1. Slider fill: 40% opacity
+        const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.4)`;
+        hdr.style.setProperty("--light-fill", fillRgba);
+        fill.style.background = fillRgba;
 
-        // Update percent
+        // 2. Icon: lighter version (HSL +60% lightness)
+        const hsl = this._rgbToHsl(rgb[0], rgb[1], rgb[2]);
+        const lightHsl = `hsl(${hsl.h}, ${hsl.s}%, ${Math.min(100, hsl.l + 60)}%)`;
+        icon.style.color = lightHsl;
+
+        // 3. Update percent
         hdr.style.setProperty("--percent", bri + "%");
         percentEl.textContent = bri + "%";
         hdr.classList.toggle("off", bri === 0);
 
-        // Dynamic text color
-        const { r, g, b } = this._hexToRgb(hex);
-        const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-        const textColor = lum > 0.55 ? "#000" : "#fff";
-        hdr.style.color = textColor;
-        hdr.querySelectorAll("ha-icon, .name, .lux").forEach(e => e.style.color = textColor);
-
-        // % label: white if under fill
-        const rHeader = hdr.getBoundingClientRect();
-        const percentX = percentEl.getBoundingClientRect().left - rHeader.left + (percentEl.offsetWidth / 2);
-        const underFill = percentX <= (rHeader.width * bri / 100);
+        // 4. % label: dynamic
+        const rect = hdr.getBoundingClientRect();
+        const percentCenterX = percentEl.getBoundingClientRect().left - rect.left + (percentEl.offsetWidth / 2);
+        const underFill = percentCenterX <= (rect.width * bri / 100);
+        const lum = (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
         percentEl.style.color = underFill ? (lum > 0.5 ? "#000" : "#fff") : "#fff";
 
-        // Update chevron
+        // 5. Chevron
         const chevron = hdr.querySelector(".chevron");
         if (chevron) {
-          const isExpanded = hdr.closest(".group")?.classList.contains("expanded");
-          chevron.setAttribute("icon", isExpanded ? "mdi:chevron-down" : "mdi:chevron-right");
+          const expanded = hdr.closest(".group")?.classList.contains("expanded");
+          chevron.setAttribute("icon", expanded ? "mdi:chevron-down" : "mdi:chevron-right");
         }
 
         this._lastStates[entity] = key;
       }
 
-      // Lux sensor
       const lux = el.querySelector(".lux");
       if (lux) {
         const s = hass.states[lux.dataset.entity];
@@ -335,7 +338,6 @@ class LightGroupCard extends HTMLElement {
         lux.textContent = v !== null ? `${v} lx` : "-- lx";
       }
 
-      // Reload individuals if expanded
       const grp = el.closest(".group");
       if (grp && grp.classList.contains("expanded")) {
         this._loadIndividuals(grp.dataset.entity, grp.querySelector(".individuals"));
@@ -344,19 +346,28 @@ class LightGroupCard extends HTMLElement {
   }
 
   /* -------------------------------------------------
-     HELPERS
+     COLOR HELPERS
   ------------------------------------------------- */
-  _hexToRgb(h) {
-    h = h.replace("#", "");
-    if (h.length === 3) h = h.split("").map(c => c + c).join("");
-    return {
-      r: parseInt(h.substr(0, 2), 16),
-      g: parseInt(h.substr(2, 2), 16),
-      b: parseInt(h.substr(4, 2), 16)
-    };
-  }
   _rgbToHex([r, g, b]) {
     return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+  }
+
+  _rgbToHsl(r, g, b) {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h, s, l = (max + min) / 2;
+    if (max === min) { h = s = 0; }
+    else {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      switch (max) {
+        case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+        case g: h = (b - r) / d + 2; break;
+        case b: h = (r - g) / d + 4; break;
+      }
+      h /= 6;
+    }
+    return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
   }
 
   getCardSize() { return 3 + (this.config?.groups?.length || 0) * 3; }
