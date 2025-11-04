@@ -1,17 +1,18 @@
 /* -------------------------------------------------
    light-group-card.js
-   – Text & %: always white
-   – OFF: card bg +15% lighter
-   – ON: slider = light color (40% opacity)
-   – Individual sliders: same color
+   – Sliding: live visual feedback (no off)
+   – Individuals: use own rgb_color
+   – No refresh loop on dropdown
+   – OFF: card bg +15%
+   – Text: white
    – Dragging: smooth
-   – Icon: lighter version of light color
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
   constructor() {
     super();
     this._dragging = {};
     this._lastStates = {};
+    this._expandedCache = new Set(); // Prevent refresh loop
     this.attachShadow({ mode: "open" });
   }
 
@@ -88,7 +89,7 @@ class LightGroupCard extends HTMLElement {
           background: var(--light-fill, rgba(85,85,85,0.4));
           border-radius: 12px;
           z-index: 1;
-          transition: width 0.1s ease, background 0.2s ease;
+          transition: width 0.05s ease;
         }
         .slider-track {
           position: absolute;
@@ -155,7 +156,7 @@ class LightGroupCard extends HTMLElement {
         if (el === percentEl) percentEl = clone;
       });
 
-      this._dragging[entity] = false;
+      this._dragging[entity] = { active: false, lastPct: 0 };
 
       const updateBrightness = (clientX, commit = false) => {
         const rect = track.getBoundingClientRect();
@@ -163,29 +164,32 @@ class LightGroupCard extends HTMLElement {
         const width = rect.width;
         const pct = Math.max(0, Math.min(100, Math.round((offsetX / width) * 100)));
 
+        // LIVE UPDATE UI
         header.style.setProperty("--percent", pct + "%");
         percentEl.textContent = pct + "%";
 
-        if (commit) {
+        // Only commit on release
+        if (commit && this._dragging[entity].lastPct !== pct) {
           if (pct > 0) {
             this._hass.callService("light", "turn_on", { entity_id: entity, brightness_pct: pct });
           } else {
             this._hass.callService("light", "turn_off", { entity_id: entity });
           }
+          this._dragging[entity].lastPct = pct;
         }
       };
 
-      // DRAG WORKS
+      // DRAG: LIVE FEEDBACK
       track.addEventListener("pointerdown", e => {
         e.preventDefault();
-        this._dragging[entity] = true;
+        this._dragging[entity].active = true;
         track.setPointerCapture(e.pointerId);
         updateBrightness(e.clientX);
 
-        const move = ev => this._dragging[entity] && updateBrightness(ev.clientX);
+        const move = ev => this._dragging[entity].active && updateBrightness(ev.clientX);
         const up = () => {
-          if (!this._dragging[entity]) return;
-          this._dragging[entity] = false;
+          if (!this._dragging[entity].active) return;
+          this._dragging[entity].active = false;
           track.releasePointerCapture(e.pointerId);
           updateBrightness(e.clientX, true);
           track.removeEventListener("pointermove", move);
@@ -213,7 +217,10 @@ class LightGroupCard extends HTMLElement {
           const individuals = grp.querySelector(".individuals");
           individuals.classList.toggle("show", expanded);
           chevron.setAttribute("icon", expanded ? "mdi:chevron-down" : "mdi:chevron-right");
-          if (expanded) this._loadIndividuals(grp.dataset.entity, individuals);
+          if (expanded && !this._expandedCache.has(entity)) {
+            this._loadIndividuals(entity, individuals);
+            this._expandedCache.add(entity);
+          }
         });
       }
 
@@ -264,13 +271,13 @@ class LightGroupCard extends HTMLElement {
       container.insertAdjacentHTML("beforeend", html);
     });
 
-    this._attachAll();
+    this._attachAll(); // Re-attach events
   }
 
   set hass(hass) {
     this._hass = hass;
 
-    // Get card background once
+    // Card background
     const cardBg = getComputedStyle(this).backgroundColor || "rgb(28,28,28)";
     const rgbMatch = cardBg.match(/(\d+),\s*(\d+),\s*(\d+)/);
     const cardRgb = rgbMatch ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])] : [28,28,28];
@@ -295,27 +302,26 @@ class LightGroupCard extends HTMLElement {
         const percentEl = hdr.querySelector(".percent");
         const icon = hdr.querySelector(".icon");
 
-        // OFF: slightly lighter background
+        // OFF: lighter background
         hdr.style.setProperty("--off-bg", offBg);
         if (!on) {
           hdr.style.background = offBg;
+          fill.style.background = "transparent";
         }
 
-        // ON: slider fill with 40% opacity
+        // ON: 40% opacity fill
         if (on) {
           const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.4)`;
           hdr.style.setProperty("--light-fill", fillRgba);
           fill.style.background = fillRgba;
-        } else {
-          fill.style.background = "transparent";
         }
 
-        // Icon: lighter version
+        // Icon: lighter
         const hsl = this._rgbToHsl(rgb[0], rgb[1], rgb[2]);
         const lightHsl = `hsl(${hsl.h}, ${hsl.s}%, ${Math.min(100, hsl.l + 60)}%)`;
         icon.style.color = lightHsl;
 
-        // Update percent
+        // Percent
         hdr.style.setProperty("--percent", bri + "%");
         percentEl.textContent = bri + "%";
 
@@ -329,22 +335,18 @@ class LightGroupCard extends HTMLElement {
         this._lastStates[entity] = key;
       }
 
+      // Lux
       const lux = el.querySelector(".lux");
       if (lux) {
         const s = hass.states[lux.dataset.entity];
         const v = s && !isNaN(s.state) ? Math.round(+s.state) : null;
         lux.textContent = v !== null ? `${v} lx` : "-- lx";
       }
-
-      const grp = el.closest(".group");
-      if (grp && grp.classList.contains("expanded")) {
-        this._loadIndividuals(grp.dataset.entity, grp.querySelector(".individuals"));
-      }
     });
   }
 
   /* -------------------------------------------------
-     COLOR HELPERS
+     HELPERS
   ------------------------------------------------- */
   _rgbToHex([r, g, b]) {
     return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
