@@ -1,18 +1,19 @@
 /* -------------------------------------------------
    light-group-card.js
-   – Sliding: live visual feedback (no off)
-   – Individuals: use own rgb_color
-   – No refresh loop on dropdown
-   – OFF: card bg +15%
+   – ON at load: correct color + fill
+   – Sliding: live visual + smooth
+   – Individuals: own rgb_color
+   – No refresh loop
+   – OFF: +15% lighter
    – Text: white
-   – Dragging: smooth
+   – Config: padding
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
   constructor() {
     super();
     this._dragging = {};
     this._lastStates = {};
-    this._expandedCache = new Set(); // Prevent refresh loop
+    this._expandedCache = new Set();
     this.attachShadow({ mode: "open" });
   }
 
@@ -22,6 +23,7 @@ class LightGroupCard extends HTMLElement {
 
     this.config = config;
     const barHeight = config.bar_height || 48;
+    const padding = config.padding !== undefined ? config.padding : 16;
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -30,7 +32,7 @@ class LightGroupCard extends HTMLElement {
           background: var(--ha-card-background, var(--card-background-color, #1c1c1c));
           color: #fff;
           border-radius: 12px;
-          padding: 16px;
+          padding: ${padding}px;
           display: block;
           user-select: none;
         }
@@ -110,7 +112,7 @@ class LightGroupCard extends HTMLElement {
 
     config.groups.forEach(g => {
       const lux = g.lux_sensor
-        ? `<span class="lux" data-entity="${g.lux_sensor}">-- lx</span>`
+       t ? `<span class="lux" data-entity="${g.lux_sensor}">-- lx</span>`
         : "";
       const manual = JSON.stringify(g.lights || []).replace(/"/g, "&quot;");
       html += `
@@ -164,11 +166,11 @@ class LightGroupCard extends HTMLElement {
         const width = rect.width;
         const pct = Math.max(0, Math.min(100, Math.round((offsetX / width) * 100)));
 
-        // LIVE UPDATE UI
+        // LIVE UI UPDATE
         header.style.setProperty("--percent", pct + "%");
         percentEl.textContent = pct + "%";
 
-        // Only commit on release
+        // Commit only on release
         if (commit && this._dragging[entity].lastPct !== pct) {
           if (pct > 0) {
             this._hass.callService("light", "turn_on", { entity_id: entity, brightness_pct: pct });
@@ -179,7 +181,6 @@ class LightGroupCard extends HTMLElement {
         }
       };
 
-      // DRAG: LIVE FEEDBACK
       track.addEventListener("pointerdown", e => {
         e.preventDefault();
         this._dragging[entity].active = true;
@@ -271,7 +272,7 @@ class LightGroupCard extends HTMLElement {
       container.insertAdjacentHTML("beforeend", html);
     });
 
-    this._attachAll(); // Re-attach events
+    this._attachAll();
   }
 
   set hass(hass) {
