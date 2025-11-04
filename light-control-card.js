@@ -136,9 +136,16 @@ class LightGroupCard extends HTMLElement {
         ? `<span class="lux" data-entity="${g.lux_sensor}">-- lx</span>`
         : "";
       const manual = JSON.stringify(g.lights || []).replace(/"/g, "&quot;");
-      const allLights = g.lights || (g.entity ? [g.entity] : []);
-      const isSingle = allLights.length === 1;
+// Determine if this is a group light (has children)
+let isSingle = true;
 
+      // Manually listed lights in YAML
+      if (g.lights && g.lights.length > 1) {
+        isSingle = false;
+      } else if (g.entity && this._hass?.states?.[g.entity]?.attributes?.entity_id?.length > 1) {
+        // HA light group with multiple child entities
+        isSingle = false;
+      }      
       const iconName = isSingle ? (g.icon || "mdi:lightbulb") : (g.icon || "mdi:lightbulb-group");
       const chevronHtml = isSingle ? "" : `<ha-icon class="chevron" icon="mdi:chevron-right"></ha-icon>`;
       
@@ -209,20 +216,24 @@ class LightGroupCard extends HTMLElement {
         if (commit) {
           this._dragging[entity].lastPct = pct;
           this._dragging[entity].lastRgb = rgb;
-         
+        
           const st = this._hass.states[entity];
           const isOn = st && st.state === "on";
          
-          if (pct === 0) {
-            this._hass.callService("light", "turn_off", { entity_id: entity });
-          } else {
-            // ✅ Always set brightness, whether off or on
+          // ✅ If brightness > 0 → always turn_on (never toggle off)
+          if (pct > 0) {
             this._hass.callService("light", "turn_on", {
               entity_id: entity,
               brightness_pct: pct
             });
+          } else if (pct === 0 && isOn) {
+            // ✅ Only turn_off when slider ends at 0
+            this._hass.callService("light", "turn_off", {
+              entity_id: entity
+            });
           }
         }
+
 
       };
 
