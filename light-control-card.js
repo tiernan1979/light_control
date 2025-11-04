@@ -1,12 +1,12 @@
 /* -------------------------------------------------
    light-group-card.js
-   – Sliding: works from OFF/ON → exact %
-   – Fill: visible when OFF (uses rgb_color or default)
-   – Fill: live update when ON
-   – Individuals: own rgb_color + visible when OFF
-   – No refresh loop
-   – OFF: +5% brighter
-   – padding: YAML config
+   – GROUP: click = turn ALL ON (not toggle)
+   – COLOR: only changes ON lights
+   – MIXED: no wrong toggling
+   – Dragging: smooth, exact %
+   – Fill: visible when OFF + ON
+   – Padding: between groups
+   – Individuals: own rgb_color
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
   constructor() {
@@ -14,7 +14,7 @@ class LightGroupCard extends HTMLElement {
     this._dragging = {};
     this._lastStates = {};
     this._expandedCache = new Set();
-    this._defaultRgb = [85, 85, 85]; // fallback
+    this._defaultRgb = [85, 85, 85];
     this.attachShadow({ mode: "open" });
   }
 
@@ -24,7 +24,7 @@ class LightGroupCard extends HTMLElement {
 
     this.config = config;
     const barHeight = config.bar_height || 48;
-    const padding = config.padding !== undefined ? config.padding : 16;
+    const groupPadding = config.padding !== undefined ? config.padding : 8;
 
     this.shadowRoot.innerHTML = `
       <style>
@@ -33,11 +33,15 @@ class LightGroupCard extends HTMLElement {
           background: var(--ha-card-background, var(--card-background-color, #1c1c1c));
           color: #fff;
           border-radius: 12px;
-          padding: ${padding}px;
+          padding: 16px;
           display: block;
           user-select: none;
         }
-        .group { margin-bottom: 12px; }
+        .groups { }
+        .group {
+          margin-top: ${groupPadding}px;
+        }
+        .group:first-child { margin-top: 0; }
         .header {
           position: relative;
           display: flex;
@@ -53,7 +57,7 @@ class LightGroupCard extends HTMLElement {
         }
 
         .header ha-icon.icon {
-          font-size: 24px;
+          lavor: 24px;
           cursor: pointer;
           z-index: 3;
           pointer-events: auto;
@@ -92,7 +96,7 @@ class LightGroupCard extends HTMLElement {
           background: var(--light-fill, rgba(85,85,85,0.4));
           border-radius: 12px;
           z-index: 1;
-          transition: width 0.05s ease;
+          transition: width 0.03s ease;
         }
         .slider-track {
           position: absolute;
@@ -167,13 +171,14 @@ class LightGroupCard extends HTMLElement {
         const width = rect.width;
         const pct = Math.max(0, Math.min(100, Math.round((offsetX / width) * 100)));
 
-        // LIVE UI UPDATE
         header.style.setProperty("--percent", pct + "%");
         percentEl.textContent = pct + "%";
 
-        // Get current rgb (from state or last known)
         const st = this._hass.states[entity];
-        const rgb = (st && st.attributes && st.attributes.rgb_color) ? st.attributes.rgb_color : this._dragging[entity].lastRgb;
+        const rgb = (st && st.attributes && st.attributes.rgb_color)
+          ? st.attributes.rgb_color
+          : this._dragging[entity].lastRgb;
+
         const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.4)`;
         header.style.setProperty("--light-fill", fillRgba);
         fill.style.background = fillRgba;
@@ -181,8 +186,12 @@ class LightGroupCard extends HTMLElement {
         if (commit) {
           this._dragging[entity].lastPct = pct;
           this._dragging[entity].lastRgb = rgb;
+
           if (pct > 0) {
-            this._hass.callService("light", "turn_on", { entity_id: entity, brightness_pct: pct });
+            this._hass.callService("light", "turn_on", {
+              entity_id: entity,
+              brightness_pct: pct
+            });
           } else {
             this._hass.callService("light", "turn_off", { entity_id: entity });
           }
@@ -233,11 +242,22 @@ class LightGroupCard extends HTMLElement {
         });
       }
 
+      // FIXED: Group click = turn ALL ON
       header.addEventListener("click", e => {
         if (e.target.closest(".icon") || e.target.closest(".chevron") || e.target.closest(".lux")) return;
+
         const st = this._hass.states[entity];
-        const turnOn = !st || st.state === "off";
-        this._hass.callService("light", turnOn ? "turn_on" : "turn_off", { entity_id: entity });
+        const allOn = st && st.attributes && st.attributes.entity_id
+          ? st.attributes.entity_id.every(id => this._hass.states[id]?.state === "on")
+          : false;
+
+        if (allOn) {
+          // All ON → turn OFF
+          this._hass.callService("light", "turn_off", { entity_id: entity });
+        } else {
+          // Any OFF → turn ALL ON
+          this._hass.callService("light", "turn_on", { entity_id: entity });
+        }
       });
     });
   }
@@ -286,7 +306,6 @@ class LightGroupCard extends HTMLElement {
   set hass(hass) {
     this._hass = hass;
 
-    // Card background
     const cardBg = getComputedStyle(this).backgroundColor || "rgb(28,28,28)";
     const rgbMatch = cardBg.match(/(\d+),\s*(\d+),\s*(\d+)/);
     const cardRgb = rgbMatch ? [parseInt(rgbMatch[1]), parseInt(rgbMatch[2]), parseInt(rgbMatch[3])] : [28,28,28];
@@ -311,27 +330,22 @@ class LightGroupCard extends HTMLElement {
         const percentEl = hdr.querySelector(".percent");
         const icon = hdr.querySelector(".icon");
 
-        // OFF: +5% brighter
         hdr.style.setProperty("--off-bg", offBg);
         if (!on) {
           hdr.style.background = offBg;
         }
 
-        // Fill: always visible (even when OFF during drag)
         const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, 0.4)`;
         hdr.style.setProperty("--light-fill", fillRgba);
         fill.style.background = fillRgba;
 
-        // Icon: lighter
         const hsl = this._rgbToHsl(rgb[0], rgb[1], rgb[2]);
         const lightHsl = `hsl(${hsl.h}, ${hsl.s}%, ${Math.min(100, hsl.l + 60)}%)`;
         icon.style.color = lightHsl;
 
-        // Percent
         hdr.style.setProperty("--percent", bri + "%");
         percentEl.textContent = bri + "%";
 
-        // Chevron
         const chevron = hdr.querySelector(".chevron");
         if (chevron) {
           const expanded = hdr.closest(".group")?.classList.contains("expanded");
@@ -341,7 +355,6 @@ class LightGroupCard extends HTMLElement {
         this._lastStates[entity] = key;
       }
 
-      // Lux
       const lux = el.querySelector(".lux");
       if (lux) {
         const s = hass.states[lux.dataset.entity];
