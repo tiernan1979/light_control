@@ -1,11 +1,12 @@
 /* -------------------------------------------------
    light-group-card.js
    – Full bar coloured
-   – Icon opens colour picker
-   – Chevron-down expands (mobile)
+   – Icon opens colour picker (group + individuals)
+   – Chevron-down expands (mobile-friendly)
    – Drag = brightness (1 %), off only at 0 %
-   – Click = toggle (anywhere except icon/chevron)
-   – Uses AirconControlCard pattern
+   – Single click anywhere else = toggle on/off
+   – Text colour adapts to light colour
+   – Uses AirconControlCard clone-and-reattach pattern
 ------------------------------------------------- */
 class LightGroupCard extends HTMLElement {
   constructor() {
@@ -26,7 +27,7 @@ class LightGroupCard extends HTMLElement {
       <style>
         :host{
           font-family:'Roboto',sans-serif;
-          background:var(--card-background-color,#000);
+          background:var(--card-backgroundccolor,#000);
           color:var(--text-color,#fff);
           border-radius:12px;
           padding:16px;
@@ -73,7 +74,6 @@ class LightGroupCard extends HTMLElement {
         }
         .header .chevron:active{opacity:0.7;}
         .header.expanded .chevron{transform:rotate(180deg);}
-        .header.dark-text{color:#000;}
         .slider-track{
           position:absolute;
           inset:0;
@@ -122,7 +122,6 @@ class LightGroupCard extends HTMLElement {
         header.closest(".group").dataset.entity;
       if (!entity) return;
 
-      // ---- Use `let` so we can replace after cloning ----
       let track = header.querySelector(".slider-track");
       let icon = header.querySelector(".icon");
       let chevron = header.querySelector(".chevron");
@@ -206,7 +205,7 @@ class LightGroupCard extends HTMLElement {
         });
       }
 
-      // ---- TAP ANYWHERE ELSE = TOGGLE ----
+      // ---- SINGLE CLICK ANYWHERE ELSE = TOGGLE ----
       header.addEventListener("click", e => {
         if (
           e.target.closest(".icon") ||
@@ -300,12 +299,20 @@ class LightGroupCard extends HTMLElement {
         hdr.querySelector(".percent").textContent = bri + "%";
         hdr.classList.toggle("off", bri === 0);
 
+        // ---- Dynamic text colour ----
         if (on) {
           const { r, g, b } = this._hexToRgb(hex);
           const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-          hdr.classList.toggle("dark-text", lum > 0.5);
+          const textColor = lum > 0.5 ? "#000" : "#fff";
+          hdr.style.color = textColor;
+          hdr.querySelectorAll("ha-icon, .name, .lux, .percent").forEach(el => {
+            el.style.color = textColor;
+          });
         } else {
-          hdr.classList.remove("dark-text");
+          hdr.style.color = "#fff";
+          hdr.querySelectorAll("ha-icon, .name, .lux, .percent").forEach(el => {
+            el.style.color = "#fff";
+          });
         }
 
         this._lastStates[entity] = key;
@@ -329,38 +336,22 @@ class LightGroupCard extends HTMLElement {
      HELPERS
   ------------------------------------------------- */
   _shade(hex, pct) {
-    let [r, g, b] = hex
-      .slice(1)
-      .match(/.{2}/g)
-      .map(v => parseInt(v, 16));
+    let [r, g, b] = hex.slice(1).match(/.{2}/g).map(v => parseInt(v, 16));
     r = Math.min(255, Math.round((r * (100 + pct)) / 100));
     g = Math.min(255, Math.round((g * (100 + pct)) / 100));
     b = Math.min(255, Math.round((b * (100 + pct)) / 100));
-    return `#${r.toString(16).padStart(2, "0")}${g
-      .toString(16)
-      .padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+    return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
   }
-  _rgba(hex, a) {
-    const { r, g, b } = this._hexToRgb(hex);
-    return `rgba(${r},${g},${b},${a})`;
-  }
+  _rgba(hex, a) { const { r, g, b } = this._hexToRgb(hex); return `rgba(${r},${g},${b},${a})`; }
   _hexToRgb(h) {
     h = h.replace("#", "");
     if (h.length === 3) h = h.split("").map(c => c + c).join("");
-    return {
-      r: parseInt(h.substr(0, 2), 16),
-      g: parseInt(h.substr(2, 2), 16),
-      b: parseInt(h.substr(4, 2), 16)
-    };
+    return { r: parseInt(h.substr(0, 2), 16), g: parseInt(h.substr(2, 2), 16), b: parseInt(h.substr(4, 2), 16) };
   }
   _rgbToHex([r, g, b]) {
-    return `#${r.toString(16).padStart(2, "0")}${g
-      .toString(16)
-      .padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
+    return `#${r.toString(16).padStart(2, "0")}${g.toString(16).padStart(2, "0")}${b.toString(16).padStart(2, "0")}`;
   }
 
-  getCardSize() {
-    return 3 + (this.config?.groups?.length || 0) * 3;
-  }
+  getCardSize() { return 3 + (this.config?.groups?.length || 0) * 3; }
 }
 customElements.define("light-group-card", LightGroupCard);
