@@ -219,27 +219,23 @@ let isSingle = true;
         
           const st = this._hass.states[entity];
           const isOn = st && st.state === "on";
-         
-          // ✅ If brightness > 0 → always turn_on (never toggle off)
+        
           if (pct > 0) {
-            this._hass.callService("light", "turn_on", {
-              entity_id: entity,
-              brightness_pct: pct
-            });
+            // Always turn_on with the desired brightness
+            const serviceData = { entity_id: entity, brightness_pct: pct };
+        
+            // If RGB is provided, include it so color doesn't reset
+            if (rgb && rgb.length === 3) {
+              serviceData.rgb_color = rgb;
+            }
+        
+            this._hass.callService("light", "turn_on", serviceData);
           } else if (pct === 0 && isOn) {
-            // ✅ Only turn_off when slider ends at 0
-            this._hass.callService("light", "turn_off", {
-              entity_id: entity
-            });
+            // Only turn_off if slider ends at 0
+            this._hass.callService("light", "turn_off", { entity_id: entity });
           }
         }
-
-
       };
-
-
-
-
 
       track.addEventListener("pointerdown", e => {
         e.preventDefault();
@@ -381,63 +377,78 @@ set hass(hass) {
     Math.min(255, Math.round(cardRgb[2] * 1.05))
   ];
 
-  this.shadowRoot.querySelectorAll(".item, .group > .header").forEach(el => {
-    const entity = el.dataset.entity || el.closest(".group").dataset.entity;
-    if (!entity) return;
+   this.shadowRoot.querySelectorAll(".item, .group > .header").forEach(el => {
+     // Determine the entity for this element
+     const entity = el.dataset.entity || el.closest(".group")?.dataset.entity;
+     if (!entity) return;
+   
+     const st = hass.states[entity];
+     if (!st) return;
+   
+     // Check if this is a group (entity has multiple members)
+     const isGroup = st.attributes?.entity_id?.length > 1;
+   
+     const on = st.state === "on";
+     const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness / 2.55) : 0;
+   
+     // Use defaultRgb when off
+     const rgb = (on && st.attributes.rgb_color) ? st.attributes.rgb_color : this._defaultRgb;
+     const hex = this._rgbToHex(rgb);
+   
+     const key = `${on}|${bri}|${hex}`;
+     if (this._lastStates[entity] !== key) {
+       const hdr = el.tagName === "DIV" && el.classList.contains("header") ? el : el.querySelector(".header");
+       const fill = hdr.querySelector(".slider-fill");
+       const percentEl = hdr.querySelector(".percent");
+       const icon = hdr.querySelector(".icon");
+   
+       // Default off background
+       hdr.style.setProperty("--off-bg", offBg);
+       if (!on) hdr.style.background = offBg;
+   
+       // Dimmer fill
+       const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${on ? 0.4 : 0.25})`;
+       hdr.style.setProperty("--light-fill", fillRgba);
+       if (fill) fill.style.background = fillRgba;
+   
+       // Light icon color
+       const hsl = this._rgbToHsl(rgb[0], rgb[1], rgb[2]);
+       const lightHsl = `hsl(${hsl.h}, ${hsl.s}%, ${Math.min(100, hsl.l + 60)}%)`;
+       if (icon) {
+         icon.style.color = lightHsl;
+         // Adjust icon for single/group
+         if (!isGroup) {
+           icon.setAttribute("icon", "mdi:lightbulb");
+         } else {
+           icon.setAttribute("icon", "mdi:light-group");
+         }
+       }
+   
+       // Show/hide chevron based on group
+       const chevron = hdr.querySelector(".chevron");
+       if (chevron) chevron.style.display = isGroup ? "" : "none";
+   
+       hdr.style.setProperty("--percent", bri + "%");
+       if (percentEl) percentEl.textContent = bri + "%";
+   
+       // Update chevron icon for expanded/collapsed groups
+       if (chevron && isGroup) {
+         const expanded = hdr.closest(".group")?.classList.contains("expanded");
+         chevron.setAttribute("icon", expanded ? "mdi:chevron-down" : "mdi:chevron-right");
+       }
+   
+       this._lastStates[entity] = key;
+     }
+   
+     // Update lux if present
+     const lux = el.querySelector(".lux");
+     if (lux) {
+       const s = hass.states[lux.dataset.entity];
+       const v = s && !isNaN(s.state) ? Math.round(+s.state) : null;
+       lux.textContent = v !== null ? `${v} lx` : "-- lx";
+     }
+   });
 
-    const st = hass.states[entity];
-    if (!st) return;
-
-    const on = st.state === "on";
-    const bri = on && st.attributes.brightness ? Math.round(st.attributes.brightness / 2.55) : 0;
-
-    // ✅ Use defaultRgb when off
-    const rgb = (on && st.attributes.rgb_color)
-      ? st.attributes.rgb_color
-      : this._defaultRgb;
-
-    const hex = this._rgbToHex(rgb);
-
-    const key = `${on}|${bri}|${hex}`;
-    if (this._lastStates[entity] !== key) {
-      const hdr = el.tagName === "DIV" && el.classList.contains("header") ? el : el.querySelector(".header");
-      const fill = hdr.querySelector(".slider-fill");
-      const percentEl = hdr.querySelector(".percent");
-      const icon = hdr.querySelector(".icon");
-
-      hdr.style.setProperty("--off-bg", offBg);
-      if (!on) {
-        hdr.style.background = offBg;
-      }
-
-      // ✅ Use dimmer fill for off state
-      const fillRgba = `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${on ? 0.4 : 0.25})`;
-      hdr.style.setProperty("--light-fill", fillRgba);
-      fill.style.background = fillRgba;
-
-      const hsl = this._rgbToHsl(rgb[0], rgb[1], rgb[2]);
-      const lightHsl = `hsl(${hsl.h}, ${hsl.s}%, ${Math.min(100, hsl.l + 60)}%)`;
-      icon.style.color = lightHsl;
-
-      hdr.style.setProperty("--percent", bri + "%");
-      percentEl.textContent = bri + "%";
-
-      const chevron = hdr.querySelector(".chevron");
-      if (chevron) {
-        const expanded = hdr.closest(".group")?.classList.contains("expanded");
-        chevron.setAttribute("icon", expanded ? "mdi:chevron-down" : "mdi:chevron-right");
-      }
-
-      this._lastStates[entity] = key;
-    }
-
-    const lux = el.querySelector(".lux");
-    if (lux) {
-      const s = hass.states[lux.dataset.entity];
-      const v = s && !isNaN(s.state) ? Math.round(+s.state) : null;
-      lux.textContent = v !== null ? `${v} lx` : "-- lx";
-    }
-  });
 }
 
 
