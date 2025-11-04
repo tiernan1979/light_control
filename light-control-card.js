@@ -61,7 +61,7 @@ class LightGroupCard extends HTMLElement {
         .groups{margin-top:-${pad}px}
         .group{margin-top:${pad}px}
         .header{position:relative;display:flex;align-items:center;gap:8px;height:${barHeight}px;padding:0 12px;border-radius:12px;cursor:pointer;overflow:hidden;
-                background:var(--off-bg,#333);box-shadow:0 2px 4px rgba(0,0,0,.3), inset 0 1px 2px rgba(255,255,255,.1);}
+                box-shadow:0 2px 4px rgba(0,0,0,.3), inset 0 1px 2px rgba(255,255,255,.1);}
         ha-icon{flex-shrink:0;z-index:3;}
         .icon{width:24px;height:24px}
         .chevron{font-size:22px;transition:transform .2s;z-index:3;}
@@ -139,13 +139,14 @@ class LightGroupCard extends HTMLElement {
         if (pctEl) pctEl.textContent = `${pct}%`;
       
         if (commit && entity) {
-          // prevent accidental OFF, ensure brightness >=1
-          const brightness = Math.max(pct, 1);
-          this._hass.callService("light", "turn_on", {
-            entity_id: entity,
-            brightness_pct: brightness,
-            rgb_color: rgb
-          });
+             if (pct > 0) {  // only turn on if pct > 0
+                 this._hass.callService("light", "turn_on", {
+                     entity_id: entity,
+                     brightness_pct: pct
+                 });
+             } else {        // if pct = 0, do not turn anything off
+                 // optional: do nothing or call turn_off if you want
+             }
         }
       
         if (entity) this._dragging[entity].lastRgb = rgb;
@@ -163,8 +164,8 @@ class LightGroupCard extends HTMLElement {
         const move = ev => {
           if (!dragState.active) return;
           const rect = track.getBoundingClientRect();
-          const x = ev.clientX - rect.left;
-          const pct = Math.max(0, Math.min(100, Math.round((x / rect.width) * 100)));
+          let pct = ((ev.clientX - rect.left) / rect.width) * 100;
+          pct = Math.max(0, Math.min(100, Math.round(pct)));
           commitBrightness(pct, false);
       
           dragState.dragged = true; // mark as dragged
