@@ -17,8 +17,8 @@ class LightGroupCard extends HTMLElement {
        if (dragState?.active) {
            // Use the dragging value instead of HA state
            const pct = dragState.lastPct ?? 0;
-           const fillEl = hdr.querySelector(".slider-fill");
-           const pctEl  = hdr.querySelector(".percent");
+           const fillEl = header.querySelector(".slider-fill");
+           const pctEl  = header.querySelector(".percent");
            fillEl.style.width = `${pct}%`;
            pctEl.textContent = `${pct}%`;
            return;  // skip rest of update
